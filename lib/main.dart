@@ -3,9 +3,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:google_fonts/google_fonts.dart';
+
 import 'provider/auth_provider.dart';
 import 'pages/auth_page.dart';
-
+import 'pages/dashboard_page.dart'; // ADICIONE ESTA LINHA
 
 RandomAccessFile? _instanceLock;
 
@@ -51,12 +53,12 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.orange,
-        textTheme: GoogleFonts.poppinsTextTheme(),
         scaffoldBackgroundColor: Colors.white,
+        textTheme: GoogleFonts.poppinsTextTheme(Theme.of(context).textTheme), // CORRIGIDO
       ),
       home: Consumer<AuthProvider>(
         builder: (context, auth, _) {
-          return auth.isAuthenticated ? const HomePage() : const AuthPage();
+          return auth.isAuthenticated ? const DashboardPage() : const AuthPage();
         },
       ),
     );

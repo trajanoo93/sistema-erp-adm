@@ -11,18 +11,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_localizations: # 👈 necessário para DatePicker, traduções etc
+  flutter_localizations: # necessário para DatePicker, traduções etc
     sdk: flutter
 
+  provider: ^6.1.2                    # ADICIONADO: essencial para AuthProvider, ChangeNotifierProvider
   google_fonts: ^6.2.1
-  http: ^1.1.0
-  intl: ^0.20.2 # 👈 atualizado para bater com o Flutter SDK
-  path_provider: ^2.0.15
-  open_file: ^3.2.1
+  http: ^1.2.2                        # atualizado (1.1.0 → 1.2.2) - mais estável
+  intl: ^0.20.2
+  path_provider: ^2.1.5               # atualizado para versão mais recente
+  open_file: ^3.5.9
   flutter_launcher_icons: ^0.13.1
   cupertino_icons: ^1.0.8
   fl_chart: ^0.68.0
-  permission_handler: ^10.2.0
+  permission_handler: ^11.3.1         # atualizado
   printing: ^5.14.2
   pdf: ^3.11.1
   shared_preferences: ^2.5.2

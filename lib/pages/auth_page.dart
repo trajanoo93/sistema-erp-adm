@@ -109,7 +109,7 @@ class _AuthPageState extends State<AuthPage> with SingleTickerProviderStateMixin
                 ),
                 const SizedBox(height: 32),
                 Text(
-                  'Painel ERP Unificado',
+                  'Sistema Delivery #Go!',
                   style: GoogleFonts.poppins(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,

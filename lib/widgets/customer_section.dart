@@ -1,8 +1,10 @@
+// lib/widgets/customer_section.dart
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
-import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import '../../globals.dart'; // ← Importa currentUser
 
 class CustomerSection extends StatelessWidget {
   final TextEditingController phoneController;
@@ -28,10 +30,16 @@ class CustomerSection extends StatelessWidget {
     required this.isLoading,
   }) : super(key: key);
 
+  /// Salva log com nome da unidade autenticada
   Future<void> logToFile(String message) async {
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/sistema-erp-barreiro/app_logs.txt');
+      final unidade = currentUser?.unidade ?? 'Desconhecida';
+      final sanitizedUnidade = unidade.replaceAll(' ', '_').toLowerCase();
+      final appDir = Directory('${directory.path}/ERPUnificado/$sanitizedUnidade');
+      if (!appDir.existsSync()) appDir.createSync(recursive: true);
+
+      final file = File('${appDir.path}/app_logs.txt');
       await file.writeAsString('[${DateTime.now()}] $message\n', mode: FileMode.append);
     } catch (e) {
       debugPrint('Falha ao escrever log: $e');
@@ -41,13 +49,16 @@ class CustomerSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primaryColor = const Color(0xFFF28C38);
+    final unidade = currentUser?.unidade ?? 'CD';
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ListTile(
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          leading: Icon(Icons.person_outline, color: primaryColor),
           title: Text(
-            'Dados do Cliente',
+            'Dados do Cliente - $unidade',
             style: GoogleFonts.poppins(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -55,118 +66,142 @@ class CustomerSection extends StatelessWidget {
             ),
           ),
         ),
-        TextFormField(
-          controller: phoneController,
-          decoration: InputDecoration(
-            labelText: 'Telefone',
-            labelStyle: GoogleFonts.poppins(
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextFormField(
+            controller: phoneController,
+            decoration: InputDecoration(
+              labelText: 'Telefone',
+              labelStyle: GoogleFonts.poppins(
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor, width: 2),
+              ),
+              prefixIcon: Icon(Icons.phone, color: primaryColor),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              suffixIcon: isLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : IconButton(
+                      icon: Icon(Icons.search_rounded, color: primaryColor),
+                      tooltip: 'Buscar cliente por telefone',
+                      onPressed: () {
+                        logToFile('Busca de cliente iniciada via telefone: ${phoneController.text}');
+                        onFetchCustomer();
+                      },
+                    ),
             ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor, width: 2),
-            ),
-            prefixIcon: Icon(Icons.phone, color: primaryColor),
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            suffixIcon: isLoading
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : IconButton(
-                    icon: Icon(Icons.search, color: primaryColor),
-                    onPressed: onFetchCustomer,
-                  ),
+            keyboardType: TextInputType.phone,
+            inputFormatters: [
+              MaskTextInputFormatter(
+                mask: '(##) #####-####',
+                filter: {'#': RegExp(r'[0-9]')},
+              ),
+            ],
+            style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
+            onChanged: (value) {
+              logToFile('Telefone alterado: $value');
+              onPhoneChanged(value);
+            },
+            validator: validator,
           ),
-          keyboardType: TextInputType.phone,
-          inputFormatters: [
-            MaskTextInputFormatter(
-              mask: '(##) #####-####',
-              filter: {'#': RegExp(r'[0-9]')},
-            ),
-          ],
-          style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
-          onChanged: onPhoneChanged,
-          validator: validator,
         ),
         const SizedBox(height: 16),
-        TextFormField(
-          controller: nameController,
-          decoration: InputDecoration(
-            labelText: 'Nome',
-            labelStyle: GoogleFonts.poppins(
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextFormField(
+            controller: nameController,
+            decoration: InputDecoration(
+              labelText: 'Nome',
+              labelStyle: GoogleFonts.poppins(
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor, width: 2),
+              ),
+              prefixIcon: Icon(Icons.person, color: primaryColor),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor, width: 2),
-            ),
-            prefixIcon: Icon(Icons.person, color: primaryColor),
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
+            onChanged: (value) {
+              logToFile('Nome alterado: $value');
+              onNameChanged(value);
+            },
+            validator: (value) {
+              if (value == null || value.isEmpty) {
+                return 'Por favor, insira o nome do cliente';
+              }
+              return null;
+            },
           ),
-          style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
-          onChanged: onNameChanged,
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'Por favor, insira o nome do cliente';
-            }
-            return null;
-          },
         ),
         const SizedBox(height: 16),
-        TextFormField(
-          controller: emailController,
-          decoration: InputDecoration(
-            labelText: 'E-mail (Opcional)',
-            labelStyle: GoogleFonts.poppins(
-              color: Colors.grey.shade600,
-              fontWeight: FontWeight.w500,
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: TextFormField(
+            controller: emailController,
+            decoration: InputDecoration(
+              labelText: 'E-mail (Opcional)',
+              labelStyle: GoogleFonts.poppins(
+                color: Colors.grey.shade600,
+                fontWeight: FontWeight.w500,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: primaryColor, width: 2),
+              ),
+              prefixIcon: Icon(Icons.email, color: primaryColor),
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor.withOpacity(0.3)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: primaryColor, width: 2),
-            ),
-            prefixIcon: Icon(Icons.email, color: primaryColor),
-            filled: true,
-            fillColor: Colors.white,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            keyboardType: TextInputType.emailAddress,
+            style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
+            onChanged: (value) {
+              logToFile('E-mail alterado: $value');
+              onEmailChanged(value);
+            },
+            validator: validator,
           ),
-          keyboardType: TextInputType.emailAddress,
-          style: GoogleFonts.poppins(fontSize: 14, color: Colors.black87),
-          onChanged: onEmailChanged,
-          validator: validator,
         ),
+        const SizedBox(height: 8),
       ],
     );
   }

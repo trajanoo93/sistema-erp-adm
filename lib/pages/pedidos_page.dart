@@ -6,9 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-
-import '../models/pedido_model.dart';
-import '../services/pedido_service.dart';
+import '../globals.dart';
+import '../services/gas_api.dart';
 import 'pedido_detail_dialog.dart';
 
 class LtrTextField extends StatelessWidget {
@@ -80,17 +79,17 @@ class PedidosPage extends StatefulWidget {
   const PedidosPage({Key? key}) : super(key: key);
 
   @override
-  State<PedidosPage> createState() => PedidosPageState();
+  State<PedidosPage> createState() => _PedidosPageState();
 }
 
-class PedidosPageState extends State<PedidosPage> {
+class _PedidosPageState extends State<PedidosPage> {
   final Color primaryColor = const Color(0xFFF28C38);
 
   List<Pedido> _allPedidos = [];
   List<Pedido> _filteredPedidos = [];
   List<String> _previousPedidoIds = [];
   List<String> _printedPedidoIds = [];
-  List<Pedido> _problematicPedidos = []; // Lista para pedidos com problemas
+  List<Pedido> _problematicPedidos = [];
 
   String _searchText = '';
   DateTime? _startDate;
@@ -122,9 +121,23 @@ class PedidosPageState extends State<PedidosPage> {
   bool _isFetching = false;
   final Set<String> _printingNow = {};
 
+  late GasApi _gasApi;
+
   @override
   void initState() {
     super.initState();
+
+    if (currentUser == null) {
+      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthPage()));
+      return;
+    }
+
+    // Inicializa GasApi com storeId dinâmico
+  _gasApi = GasApi(
+  user: currentUser!,
+  storeId: currentUser!.storeId,  // 100% DINÂMICO
+);
+
     final now = DateTime.now();
     _startDate = DateTime(now.year, now.month, now.day, 0, 0, 0);
     _endDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
@@ -148,14 +161,15 @@ class PedidosPageState extends State<PedidosPage> {
     _fetchTimer = Timer.periodic(const Duration(minutes: 1), (_) => _fetchPedidosSilently());
   }
 
-@override
+  @override
   void dispose() {
-    _fetchTimer?.cancel(); // Corrigido para usar apenas cancel()
+    _fetchTimer?.cancel();
     _debounceTimer?.cancel();
     _startDateController.dispose();
     _endDateController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _gasApi.dispose();
     super.dispose();
   }
 
@@ -210,33 +224,48 @@ class PedidosPageState extends State<PedidosPage> {
   }
 
   Future<void> _loadPreviousPedidoIds() async {
-    _previousPedidoIds = await PedidoService.loadPreviousPedidoIds();
+    final dir = await getApplicationDocumentsDirectory();
+    final appDir = Directory('${dir.path}/ERPUnificado');
+    if (!appDir.existsSync()) appDir.createSync(recursive: true);
+    final file = File('${appDir.path}/previous_pedido_ids.json');
+    if (await file.exists()) {
+      _previousPedidoIds = List<String>.from(jsonDecode(await file.readAsString()));
+    }
   }
 
   Future<void> _loadPrintedPedidoIds() async {
-    _printedPedidoIds = await PedidoService.loadPrintedPedidoIds();
+    final dir = await getApplicationDocumentsDirectory();
+    final appDir = Directory('${dir.path}/ERPUnificado');
+    final file = File('${appDir.path}/printed_pedido_ids.json');
+    if (await file.exists()) {
+      _printedPedidoIds = List<String>.from(jsonDecode(await file.readAsString()));
+    }
   }
 
   Future<void> _savePreviousPedidoIds() async {
-    await PedidoService.savePreviousPedidoIds(_previousPedidoIds);
+    final dir = await getApplicationDocumentsDirectory();
+    final appDir = Directory('${dir.path}/ERPUnificado');
+    final file = File('${appDir.path}/previous_pedido_ids.json');
+    await file.writeAsString(jsonEncode(_previousPedidoIds));
   }
 
   Future<void> _savePrintedPedidoIds() async {
-    await PedidoService.savePrintedPedidoIds(_printedPedidoIds);
+    final dir = await getApplicationDocumentsDirectory();
+    final appDir = Directory('${dir.path}/ERPUnificado');
+    final file = File('${appDir.path}/printed_pedido_ids.json');
+    await file.writeAsString(jsonEncode(_printedPedidoIds));
   }
 
   Future<File> _getLogFile() async {
-    final directory = await getApplicationDocumentsDirectory();
-    final logDir = Directory('${directory.path}/CDBarreiro');
-    if (!logDir.existsSync()) logDir.createSync(recursive: true);
-    final logFile = File('${logDir.path}/fetch_logs.txt');
+    final dir = await getApplicationDocumentsDirectory();
+    final appDir = Directory('${dir.path}/ERPUnificado');
+    if (!appDir.existsSync()) appDir.createSync(recursive: true);
+    final logFile = File('${appDir.path}/fetch_logs.txt');
     if (!await logFile.exists()) {
       await logFile.create();
     }
     return logFile;
   }
-
-  IOSink? logSink; // Declaração movida para fora do try, usando IOSink em vez de FileOutputStream
 
   Future<void> _fetchPedidosSilently() async {
     if (_isFetching) {
@@ -244,21 +273,22 @@ class PedidosPageState extends State<PedidosPage> {
       return;
     }
     _isFetching = true;
+    IOSink? logSink;
     try {
-      final List<Pedido> newPedidos = await PedidoService.fetchPedidos();
+      final List<Pedido> newPedidos = await _gasApi.readPedidos();
       final logFile = await _getLogFile();
       logSink = logFile.openWrite(mode: FileMode.append);
 
       final List<Pedido> problematic = [];
       for (var pedido in newPedidos) {
         final logLine = 'Pedido ${pedido.id}: descontoGiftCard=${pedido.descontoGiftCard}, JSON=${jsonEncode(pedido.toJson())}\n';
-        logSink!.write(logLine);
-        if (DateTime.tryParse(pedido.dataAgendamento) == null) {
+        logSink.write(logLine);
+        if (DateTime.tryParse(pedido.dataAgendamento) == null && pedido.dataAgendamento.isNotEmpty) {
           problematic.add(pedido);
-          logSink!.write('ERRO: Pedido ${pedido.id} tem data_agendamento inválida: ${pedido.dataAgendamento}\n');
+          logSink.write('ERRO: Pedido ${pedido.id} tem data_agendamento inválida: ${pedido.dataAgendamento}\n');
         }
       }
-      logSink!.write('Pedidos retornados: ${newPedidos.length}, Problemáticos: ${problematic.length}\n');
+      logSink.write('Pedidos retornados: ${newPedidos.length}, Problemáticos: ${problematic.length}\n');
 
       if (newPedidos.isNotEmpty) {
         final seen = <String>{};
@@ -299,7 +329,7 @@ class PedidosPageState extends State<PedidosPage> {
           await _processNewPedidos(deduped);
         }
       } else {
-        logSink!.write('Nenhum novo pedido retornado\n');
+        logSink.write('Nenhum novo pedido retornado\n');
       }
     } catch (e) {
       debugPrint('Erro ao buscar pedidos: $e');
@@ -321,7 +351,7 @@ class PedidosPageState extends State<PedidosPage> {
 
       final dataAgendamento = _parseDateRobust(pedido.dataAgendamento);
       if (dataAgendamento == null) {
-        await PedidoService.writeLog(
+        await _writeLog(
             'Pedido ${pedido.id} ignorado para impressão: data_agendamento inválida (${pedido.dataAgendamento}).',
             context);
         continue;
@@ -342,15 +372,17 @@ class PedidosPageState extends State<PedidosPage> {
               markSheets: true,
             );
 
+            await _gasApi.markPrinted(pedido.id);
+
             setState(() => _printedPedidoIds.add(key));
             await _savePrintedPedidoIds();
-            await PedidoService.writeLog(
+            await _writeLog(
                 'Pedido ${pedido.id} impresso com sucesso na tentativa $attempt.', context);
 
             printedSuccessfully = true;
             break;
           } catch (e) {
-            await PedidoService.writeLog(
+            await _writeLog(
                 'Erro ao imprimir pedido ${pedido.id} na tentativa $attempt: $e', context);
             if (attempt == 3 && mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
@@ -362,10 +394,21 @@ class PedidosPageState extends State<PedidosPage> {
         }
         _printingNow.remove(key);
         if (!printedSuccessfully) {
-          await PedidoService.writeLog(
+          await _writeLog(
               'Pedido ${pedido.id} não foi impresso após todas as tentativas.', context);
         }
       }
+    }
+  }
+
+  Future<void> _writeLog(String message, BuildContext context) async {
+    try {
+      final logFile = await _getLogFile();
+      final logSink = logFile.openWrite(mode: FileMode.append);
+      logSink.write('[${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}] $message\n');
+      await logSink.close();
+    } catch (e) {
+      debugPrint('Erro ao escrever log: $e');
     }
   }
 
@@ -384,9 +427,9 @@ class PedidosPageState extends State<PedidosPage> {
       } else if (_startDate != null && _endDate != null) {
         tempList = tempList.where((pedido) {
           final dataStr = pedido.dataAgendamento;
-          if (dataStr.isEmpty) return true; // Inclui pedidos sem data
+          if (dataStr.isEmpty) return true;
           final dt = _parseDateRobust(dataStr);
-          if (dt == null) return true; // Inclui pedidos com data inválida
+          if (dt == null) return true;
           return dt.isAfter(_startDate!.subtract(const Duration(seconds: 1))) &&
               dt.isBefore(_endDate!.add(const Duration(seconds: 1)));
         }).toList();
@@ -398,10 +441,9 @@ class PedidosPageState extends State<PedidosPage> {
             .toList();
       }
 
-      // Filtra pedidos concluídos se _hideCompleted for true
-        if (_hideCompleted) {
-          tempList = tempList.where((pedido) => pedido.status.toLowerCase() != 'concluído').toList();
-        }
+      if (_hideCompleted) {
+        tempList = tempList.where((pedido) => pedido.status.toLowerCase() != 'concluído').toList();
+      }
 
       tempList.sort(_compareAgendamento);
       if (mounted) {
@@ -410,15 +452,12 @@ class PedidosPageState extends State<PedidosPage> {
     });
   }
 
-  // Função para parsing robusto de datas
   DateTime? _parseDateRobust(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return null;
     try {
-      // Tenta ISO 8601 (com ou sem milissegundos, UTC ou não)
       return DateTime.tryParse(dateStr)?.toLocal();
     } catch (_) {
       try {
-        // Tenta formato DD/MM/YYYY
         if (dateStr.contains('/')) {
           final parts = dateStr.split('/');
           if (parts.length == 3) {
@@ -427,7 +466,6 @@ class PedidosPageState extends State<PedidosPage> {
         }
       } catch (_) {
         try {
-          // Tenta formato MMMM dd, yyyy
           return DateFormat('MMMM dd, yyyy').parse(dateStr, true).toLocal();
         } catch (_) {
           return null;
@@ -475,7 +513,6 @@ class PedidosPageState extends State<PedidosPage> {
     final dateTimeCriacaoA = _parseHorarioCriacao(horarioA);
     final dateTimeCriacaoB = _parseHorarioCriacao(horarioB);
 
-    // Prioriza pedidos com data válida
     if (dateTimeAgendamentoA == null && dateTimeAgendamentoB == null) return 0;
     if (dateTimeAgendamentoA == null) return 1;
     if (dateTimeAgendamentoB == null) return -1;
@@ -672,51 +709,23 @@ class PedidosPageState extends State<PedidosPage> {
                             orderStatusOptions: _orderStatusOptions,
                             formatHorario: _formatHorario,
                             formatDataAgendamento: _formatoDataAgendamento,
-                            onStatusChanged: (newStatus) {
-                              PedidoService.updateStatusPedidoBarreiro(pedido, newStatus, context).then((success) {
-                                if (success && mounted) {
-                                  setState(() {
-                                    final updatedPedidos = _allPedidos.map<Pedido>((p) {
-                                      return p.id == pedido.id
-                                          ? Pedido(
-                                              id: p.id,
-                                              data: p.data,
-                                              horario: p.horario,
-                                              bairro: p.bairro,
-                                              nome: p.nome,
-                                              pagamento: p.pagamento,
-                                              subTotal: p.subTotal,
-                                              total: p.total,
-                                              vendedor: p.vendedor,
-                                              taxaEntrega: p.taxaEntrega,
-                                              status: newStatus,
-                                              entregador: p.entregador,
-                                              rua: p.rua,
-                                              numero: p.numero,
-                                              cep: p.cep,
-                                              complemento: p.complemento,
-                                              latitude: p.latitude,
-                                              longitude: p.longitude,
-                                              unidade: p.unidade,
-                                              cidade: p.cidade,
-                                              tipoEntrega: p.tipoEntrega,
-                                              dataAgendamento: p.dataAgendamento,
-                                              horarioAgendamento: p.horarioAgendamento,
-                                              telefone: p.telefone,
-                                              observacao: p.observacao,
-                                              produtos: p.produtos,
-                                              rastreio: p.rastreio,
-                                              nomeCupom: p.nomeCupom,
-                                              porcentagemCupom: p.porcentagemCupom,
-                                              descontoGiftCard: p.descontoGiftCard,
-                                            )
-                                          : p;
-                                    }).toList();
-                                    _allPedidos = List<Pedido>.from(updatedPedidos);
-                                    _filteredPedidos = List<Pedido>.from(_allPedidos);
-                                  });
+                            onStatusChanged: (newStatus) async {
+                              try {
+                                await _gasApi.updateStatus(pedido.id, newStatus);
+                                setState(() {
+                                  final idx = _allPedidos.indexWhere((p) => p.id == pedido.id);
+                                  if (idx != -1) {
+                                    _allPedidos[idx] = _allPedidos[idx].copyWith(status: newStatus);
+                                  }
+                                  _filteredPedidos = List.from(_allPedidos);
+                                });
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Erro ao atualizar status: $e')),
+                                  );
                                 }
-                              });
+                              }
                             },
                             onTap: () => _openPedidoSideSheet(pedido),
                           );
@@ -729,147 +738,150 @@ class PedidosPageState extends State<PedidosPage> {
   }
 }
 
-class FilterPanel extends StatelessWidget {
-    final String searchText;
-    final TextEditingController searchController;
-    final TextEditingController startDateController;
-    final TextEditingController endDateController;
-    final String selectedStatus;
-    final bool hideCompleted; // Alterado de showCompleted para hideCompleted
-    final int filteredCount;
-    final List<String> statusOptions;
-    final Function(String) onSearchChanged;
-    final VoidCallback onPickStartDate;
-    final VoidCallback onPickEndDate;
-    final Function(String?) onStatusChanged;
-    final Function(bool) onHideCompletedChanged; // Alterado de onShowCompletedChanged
-    final FocusNode searchFocusNode;
+// === RESTANTE DO ARQUIVO (FilterPanel, _DateField, PedidoCard, extension) ===
+// (Mantido exatamente igual ao original, sem alterações)
 
-    const FilterPanel({
-      super.key,
-      required this.searchText,
-      required this.searchController,
-      required this.startDateController,
-      required this.endDateController,
-      required this.selectedStatus,
-      required this.hideCompleted,
-      required this.filteredCount,
-      required this.statusOptions,
-      required this.onSearchChanged,
-      required this.onPickStartDate,
-      required this.onPickEndDate,
-      required this.onStatusChanged,
-      required this.onHideCompletedChanged,
-      required this.searchFocusNode,
-    });
+class FilterPanel extends StatelessWidget {
+  final String searchText;
+  final TextEditingController searchController;
+  final TextEditingController startDateController;
+  final TextEditingController endDateController;
+  final String selectedStatus;
+  final bool hideCompleted;
+  final int filteredCount;
+  final List<String> statusOptions;
+  final Function(String) onSearchChanged;
+  final VoidCallback onPickStartDate;
+  final VoidCallback onPickEndDate;
+  final Function(String?) onStatusChanged;
+  final Function(bool) onHideCompletedChanged;
+  final FocusNode searchFocusNode;
+
+  const FilterPanel({
+    super.key,
+    required this.searchText,
+    required this.searchController,
+    required this.startDateController,
+    required this.endDateController,
+    required this.selectedStatus,
+    required this.hideCompleted,
+    required this.filteredCount,
+    required this.statusOptions,
+    required this.onSearchChanged,
+    required this.onPickStartDate,
+    required this.onPickEndDate,
+    required this.onStatusChanged,
+    required this.onHideCompletedChanged,
+    required this.searchFocusNode,
+  });
 
   @override
-    Widget build(BuildContext context) {
-      final primary = const Color(0xFFF28C38);
+  Widget build(BuildContext context) {
+    final primary = const Color(0xFFF28C38);
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: LtrTextField(
-                  labelText: 'Buscar ID ou Nome',
-                  controller: searchController,
-                  focusNode: searchFocusNode,
-                  onChanged: onSearchChanged,
-                  inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9\s]'))],
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: LtrTextField(
+                labelText: 'Buscar ID ou Nome',
+                controller: searchController,
+                focusNode: searchFocusNode,
+                onChanged: onSearchChanged,
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9\s]'))],
               ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: primary.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: primary.withOpacity(0.2)),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.inbox_rounded, size: 16, color: primary),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$filteredCount pedido${filteredCount != 1 ? 's' : ''}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: primary,
-                      ),
-                    ),
-                  ],
-                ),
+            ),
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: primary.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: primary.withOpacity(0.2)),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              _DateField(
-                label: 'Data inicial',
-                controller: startDateController,
-                onTap: onPickStartDate,
-              ),
-              _DateField(
-                label: 'Data final',
-                controller: endDateController,
-                onTap: onPickEndDate,
-              ),
-              SizedBox(
-                height: 40,
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  scrollDirection: Axis.horizontal,
-                  itemCount: statusOptions.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (_, i) {
-                    final s = statusOptions[i];
-                    final selected = s == selectedStatus;
-                    return ChoiceChip(
-                      label: Text(s),
-                      selected: selected,
-                      onSelected: (_) => onStatusChanged(s),
-                      pressElevation: 0,
-                      selectedColor: primary.withOpacity(0.15),
-                      labelStyle: TextStyle(
-                        color: selected ? primary : Colors.black87,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      shape: StadiumBorder(
-                        side: BorderSide(
-                          color: selected ? primary.withOpacity(0.4) : Colors.grey.withOpacity(0.25),
-                        ),
-                      ),
-                      backgroundColor: Colors.white,
-                    );
-                  },
-                ),
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  const Text('Ocultar concluídos', style: TextStyle(fontWeight: FontWeight.w500)), // Alterado o rótulo
+                  Icon(Icons.inbox_rounded, size: 16, color: primary),
                   const SizedBox(width: 6),
-                  Switch(
-                    value: hideCompleted,
-                    onChanged: onHideCompletedChanged,
-                    activeColor: primary,
-                    activeTrackColor: primary.withOpacity(0.4),
+                  Text(
+                    '$filteredCount pedido${filteredCount != 1 ? 's' : ''}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: primary,
+                    ),
                   ),
                 ],
               ),
-            ],
-          ),
-        ],
-      );
-    }
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            _DateField(
+              label: 'Data inicial',
+              controller: startDateController,
+              onTap: onPickStartDate,
+            ),
+            _DateField(
+              label: 'Data final',
+              controller: endDateController,
+              onTap: onPickEndDate,
+            ),
+            SizedBox(
+              height: 40,
+              child: ListView.separated(
+                shrinkWrap: true,
+                scrollDirection: Axis.horizontal,
+                itemCount: statusOptions.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) {
+                  final s = statusOptions[i];
+                  final selected = s == selectedStatus;
+                  return ChoiceChip(
+                    label: Text(s),
+                    selected: selected,
+                    onSelected: (_) => onStatusChanged(s),
+                    pressElevation: 0,
+                    selectedColor: primary.withOpacity(0.15),
+                    labelStyle: TextStyle(
+                      color: selected ? primary : Colors.black87,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    shape: StadiumBorder(
+                      side: BorderSide(
+                        color: selected ? primary.withOpacity(0.4) : Colors.grey.withOpacity(0.25),
+                      ),
+                    ),
+                    backgroundColor: Colors.white,
+                  );
+                },
+              ),
+            ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Ocultar concluídos', style: TextStyle(fontWeight: FontWeight.w500)),
+                const SizedBox(width: 6),
+                Switch(
+                  value: hideCompleted,
+                  onChanged: onHideCompletedChanged,
+                  activeColor: primary,
+                  activeTrackColor: primary.withOpacity(0.4),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
   }
+}
 
 class _DateField extends StatelessWidget {
   final String label;
@@ -1133,4 +1145,76 @@ class PedidoCard extends StatelessWidget {
       ),
     );
   }
+}
+
+extension on Pedido {
+  Pedido copyWith({String? status}) => Pedido(
+        id: id,
+        data: data,
+        horario: horario,
+        bairro: bairro,
+        nome: nome,
+        pagamento: pagamento,
+        subTotal: subTotal,
+        total: total,
+        vendedor: vendedor,
+        taxaEntrega: taxaEntrega,
+        status: status ?? this.status,
+        entregador: entregador,
+        rua: rua,
+        numero: numero,
+        cep: cep,
+        complemento: complemento,
+        latitude: latitude,
+        longitude: longitude,
+        unidade: unidade,
+        hifen: hifen,
+        cidade: cidade,
+        printedAt: printedAt,
+        tipoEntrega: tipoEntrega,
+        dataAgendamento: dataAgendamento,
+        horarioAgendamento: horarioAgendamento,
+        telefone: telefone,
+        observacao: observacao,
+        produtos: produtos,
+        rastreio: rastreio,
+        cupomNome: cupomNome,
+        cupomPercentual: cupomPercentual,
+        giftDesconto: giftDesconto,
+      );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'data': data,
+        'horario': horario,
+        'bairro': bairro,
+        'nome': nome,
+        'pagamento': pagamento,
+        'subTotal': subTotal,
+        'total': total,
+        'vendedor': vendedor,
+        'taxa_entrega': taxaEntrega,
+        'status': status,
+        'entregador': entregador,
+        'rua': rua,
+        'numero': numero,
+        'cep': cep,
+        'complemento': complemento,
+        'latitude': latitude,
+        'longitude': longitude,
+        'unidade': unidade,
+        '-': hifen,
+        'cidade': cidade,
+        'printed_at': printedAt?.toIso8601String(),
+        'tipo_entrega': tipoEntrega,
+        'data_agendamento': dataAgendamento,
+        'horario_agendamento': horarioAgendamento,
+        'telefone': telefone,
+        'observacao': observacao,
+        'produtos': produtos,
+        'rastreio': rastreio,
+        'AG': cupomNome,
+        'AH': cupomPercentual,
+        'AI': giftDesconto,
+      };
 }
