@@ -27,9 +27,9 @@ class Pedido {
   final String observacao;
   final String produtos;
   final String rastreio;
-  final String? nomeCupom; // Novo campo para o nome do cupom (pode ser nulo)
-  final double? porcentagemCupom; // Novo campo para a porcentagem do cupom (pode ser nulo)
-  final double? descontoGiftCard; // Novo campo para o desconto do gift card (pode ser nulo)
+  final String? nomeCupom;
+  final double? porcentagemCupom;
+  final double? descontoGiftCard; // NOME CORRETO
 
   Pedido({
     required this.id,
@@ -64,40 +64,48 @@ class Pedido {
     this.descontoGiftCard,
   });
 
+  // FUNÇÃO AUXILIAR (adicionada)
+  static double _toDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    final cleaned = value.toString().replaceAll(',', '.');
+    return double.tryParse(cleaned) ?? 0.0;
+  }
+
   factory Pedido.fromJson(Map<String, dynamic> json) {
-  return Pedido(
-    id: json['id'].toString(),
-    data: json['data']?.toString() ?? '',
-    horario: json['horario']?.toString() ?? '',
-    bairro: json['bairro']?.toString() ?? '',
-    nome: json['nome']?.toString() ?? '',
-    pagamento: json['pagamento']?.toString() ?? '',
-    subTotal: double.tryParse(json['subTotal']?.toString() ?? '0.0') ?? 0.0,
-    total: double.tryParse(json['total']?.toString() ?? '0.0') ?? 0.0,
-    vendedor: json['vendedor']?.toString() ?? '',
-    taxaEntrega: double.tryParse(json['taxa_entrega']?.toString() ?? '0.0') ?? 0.0,
-    status: json['status']?.toString() ?? '',
-    entregador: json['entregador']?.toString() ?? '',
-    rua: json['rua']?.toString() ?? '',
-    numero: json['numero']?.toString() ?? '',
-    cep: json['cep']?.toString() ?? '',
-    complemento: json['complemento']?.toString() ?? '',
-    latitude: json['latitude']?.toString() ?? '',
-    longitude: json['longitude']?.toString() ?? '',
-    unidade: json['unidade']?.toString() ?? '',
-    cidade: json['cidade']?.toString() ?? '',
-    tipoEntrega: json['tipo_entrega']?.toString() ?? '',
-    dataAgendamento: json['data_agendamento']?.toString() ?? '',
-    horarioAgendamento: json['horario_agendamento']?.toString() ?? '',
-    telefone: json['telefone']?.toString() ?? '',
-    observacao: json['observacao']?.toString() ?? '',
-    produtos: json['produtos']?.toString() ?? '',
-    rastreio: json['rastreio']?.toString() ?? '',
-    nomeCupom: json['AG']?.toString(),
-    porcentagemCupom: double.tryParse(json['AH']?.toString() ?? '0.0'),
-    descontoGiftCard: double.tryParse(json['AI']?.toString() ?? '0.0') ?? 0.0, // Alterado para 0.0 como fallback
-  );
-}
+    return Pedido(
+      id: json['id'].toString(),
+      data: json['data']?.toString() ?? '',
+      horario: json['horario']?.toString() ?? '',
+      bairro: json['bairro']?.toString() ?? '',
+      nome: json['nome']?.toString() ?? '',
+      pagamento: json['pagamento']?.toString() ?? '',
+      subTotal: _toDouble(json['subTotal']),
+      total: _toDouble(json['total']),
+      vendedor: json['vendedor']?.toString() ?? '',
+      taxaEntrega: _toDouble(json['taxa_entrega']),
+      status: json['status']?.toString() ?? '',
+      entregador: json['entregador']?.toString() ?? '',
+      rua: json['rua']?.toString() ?? '',
+      numero: json['numero']?.toString() ?? '',
+      cep: json['cep']?.toString() ?? '',
+      complemento: json['complemento']?.toString() ?? '',
+      latitude: json['latitude']?.toString() ?? '',
+      longitude: json['longitude']?.toString() ?? '',
+      unidade: json['unidade']?.toString() ?? '',
+      cidade: json['cidade']?.toString() ?? '',
+      tipoEntrega: json['tipo_entrega']?.toString() ?? '',
+      dataAgendamento: json['data_agendamento']?.toString() ?? '',
+      horarioAgendamento: json['horario_agendamento']?.toString() ?? '',
+      telefone: json['telefone']?.toString() ?? '',
+      observacao: json['observacao']?.toString() ?? '',
+      produtos: json['produtos']?.toString() ?? '',
+      rastreio: json['rastreio']?.toString() ?? '',
+      nomeCupom: json['AG']?.toString(),
+      porcentagemCupom: _toDouble(json['AH']),
+      descontoGiftCard: _toDouble(json['AI']), // CORRIGIDO
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -128,9 +136,9 @@ class Pedido {
       'observacao': observacao,
       'produtos': produtos,
       'rastreio': rastreio,
-      'AG': nomeCupom, // Inclui o nome do cupom no JSON
-      'AH': porcentagemCupom, // Inclui a porcentagem do cupom
-      'AI': descontoGiftCard, // Inclui o desconto do gift card
+      'AG': nomeCupom,
+      'AH': porcentagemCupom,
+      'AI': descontoGiftCard,
     };
   }
 

@@ -7,7 +7,7 @@ class AuthProvider extends ChangeNotifier {
   AppUser? _user;
   bool _isAuthenticated = false;
 
-  AppUser? get user => _user;
+  AppUser? get currentUser => _user;
   bool get isAuthenticated => _isAuthenticated;
 
   Future<void> login(int id) async {
@@ -18,7 +18,7 @@ class AuthProvider extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt('userId', id);
 
-      currentUser = _user; // Atualiza global
+      currentUserGlobal = _user;
       notifyListeners();
     } else {
       throw Exception('Código inválido');
@@ -31,7 +31,7 @@ class AuthProvider extends ChangeNotifier {
     if (savedId != null && appUsers.containsKey(savedId)) {
       _user = appUsers[savedId];
       _isAuthenticated = true;
-      currentUser = _user;
+      currentUserGlobal = _user;
       notifyListeners();
     }
   }
@@ -41,7 +41,7 @@ class AuthProvider extends ChangeNotifier {
     await prefs.remove('userId');
     _user = null;
     _isAuthenticated = false;
-    currentUser = null;
+    currentUserGlobal = null;
     notifyListeners();
   }
 }

@@ -7,7 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'provider/auth_provider.dart';
 import 'pages/auth_page.dart';
-import 'pages/dashboard_page.dart'; // ADICIONE ESTA LINHA
+import 'pages/home_page.dart'; // IMPORTAÇÃO CORRETA
 
 RandomAccessFile? _instanceLock;
 
@@ -54,11 +54,14 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.orange,
         scaffoldBackgroundColor: Colors.white,
-        textTheme: GoogleFonts.poppinsTextTheme(Theme.of(context).textTheme), // CORRIGIDO
+        textTheme: GoogleFonts.poppinsTextTheme(Theme.of(context).textTheme),
       ),
       home: Consumer<AuthProvider>(
         builder: (context, auth, _) {
-          return auth.isAuthenticated ? const DashboardPage() : const AuthPage();
+          if (auth.isAuthenticated) {
+            return HomePage(); // SEM const + import correto
+          }
+          return const AuthPage();
         },
       ),
     );

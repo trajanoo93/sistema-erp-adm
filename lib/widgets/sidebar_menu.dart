@@ -6,11 +6,17 @@ import '../enums.dart';
 class SidebarMenu extends StatefulWidget {
   final MenuItem selectedMenu;
   final Function(MenuItem) onMenuItemSelected;
+  final String? userName;
+  final String? userUnit;
+  final VoidCallback? onLogout;
 
   const SidebarMenu({
     Key? key,
     required this.selectedMenu,
     required this.onMenuItemSelected,
+    this.userName,
+    this.userUnit,
+    this.onLogout,
   }) : super(key: key);
 
   @override
@@ -86,8 +92,7 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
       ),
       child: Column(
         children: [
-          const SizedBox(height: 16),
-          // ===== BRAND HEADER (LOGO) =====
+          // ===== HEADER: LOGO + SAUDAÇÃO =====
           Padding(
             padding: EdgeInsets.symmetric(
               horizontal: _isCollapsed ? 0 : 8,
@@ -95,6 +100,7 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
             ),
             child: Column(
               children: [
+                // LOGO
                 SizedBox(
                   height: _isCollapsed ? 44 : 86,
                   child: Image.network(
@@ -103,7 +109,7 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
                     errorBuilder: (_, __, ___) => Text(
                       'GO',
                       style: GoogleFonts.poppins(
-                        color: const Color(0xFFF28C38),
+                        color: primary,
                         fontSize: _isCollapsed ? 18 : 24,
                         fontWeight: FontWeight.w800,
                       ),
@@ -111,6 +117,27 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
                   ),
                 ),
                 const SizedBox(height: 12),
+
+                // UNIDADE (apenas se não colapsado e tiver valor)
+                if (!_isCollapsed && widget.userUnit != null && widget.userUnit!.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      'Unidade ${widget.userUnit}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                        letterSpacing: 0.3,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+
+                const SizedBox(height: 8),
+
+                // Linha divisória suave
                 Container(
                   height: 1,
                   margin: const EdgeInsets.symmetric(horizontal: 8),
@@ -127,42 +154,106 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
               ],
             ),
           ),
+
           const SizedBox(height: 14),
-          _item(
-            icon: Icons.dashboard_rounded,
-            label: 'Dashboard',
-            menuItem: MenuItem.dashboard,
+
+          // ===== ITENS DO MENU =====
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _item(
+                    icon: Icons.dashboard_rounded,
+                    label: 'Dashboard',
+                    menuItem: MenuItem.dashboard,
+                  ),
+                  _item(
+                    icon: Icons.list_alt_rounded,
+                    label: 'Pedidos',
+                    menuItem: MenuItem.pedidos,
+                  ),
+                  _item(
+                    icon: Icons.add_rounded,
+                    label: 'Novo Pedido',
+                    menuItem: MenuItem.novoPedido,
+                  ),
+                  _pagamentosItem(),
+                  _item(
+                    icon: Icons.motorcycle_rounded,
+                    label: 'Motoboys',
+                    menuItem: MenuItem.motoboys,
+                  ),
+                  _item(
+                    icon: Icons.update_rounded,
+                    label: 'Atualizações',
+                    menuItem: MenuItem.atualizacoes,
+                  ),
+                ],
+              ),
+            ),
           ),
-          _item(
-            icon: Icons.list_alt_rounded,
-            label: 'Pedidos',
-            menuItem: MenuItem.pedidos,
+
+          // ===== RODAPÉ: COLAPSAR + SAIR =====
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                // Ícone de logout (sempre visível, mesmo colapsado)
+                if (widget.onLogout != null)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: widget.onLogout,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.12),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Icon(
+                        Icons.logout,
+                        size: 18,
+                        color: Colors.red.shade700,
+                      ),
+                    ),
+                  )
+                else
+                  const SizedBox(width: 36),
+
+                // Texto "Sair" (apenas se expandido)
+                if (!_isCollapsed && widget.onLogout != null)
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 8),
+                      child: InkWell(
+                        onTap: widget.onLogout,
+                        borderRadius: BorderRadius.circular(8),
+                        child: Text(
+                          'Sair',
+                          style: GoogleFonts.poppins(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.red.shade700,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Botão de colapsar (sempre à direita)
+                _collapseButton(primary),
+              ],
+            ),
           ),
-          _item(
-            icon: Icons.add_rounded,
-            label: 'Novo Pedido',
-            menuItem: MenuItem.novoPedido,
-          ),
-          _pagamentosItem(),
-          _item(
-            icon: Icons.motorcycle_rounded,
-            label: 'Motoboys',
-            menuItem: MenuItem.motoboys,
-          ),
-          _item(
-            icon: Icons.update_rounded,
-            label: 'Atualizações',
-            menuItem: MenuItem.atualizacoes,
-          ),
-          const Spacer(),
+
           const SizedBox(height: 8),
-          _collapseButton(primary),
-          const SizedBox(height: 12),
         ],
       ),
     );
   }
 
+  // ===== ITEM DO MENU =====
   Widget _item({
     required IconData icon,
     required String label,
@@ -216,6 +307,7 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
     );
   }
 
+  // ===== ITEM EXPANSÍVEL: PAGAMENTOS =====
   Widget _pagamentosItem() {
     final bool isSelected = widget.selectedMenu == MenuItem.pagamentos ||
         widget.selectedMenu == MenuItem.criarLink ||
@@ -307,6 +399,7 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
     );
   }
 
+  // ===== SUBITEM =====
   Widget _subItem({
     required IconData icon,
     required String label,
@@ -364,30 +457,25 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
     );
   }
 
+  // ===== BOTÃO DE COLAPSAR =====
   Widget _collapseButton(Color primary) {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Padding(
-        padding: const EdgeInsets.only(right: 8),
-        child: Tooltip(
-          message: _isCollapsed ? 'Expandir' : 'Recolher',
-          child: InkWell(
+    return Tooltip(
+      message: _isCollapsed ? 'Expandir' : 'Recolher',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () => setState(() => _isCollapsed = !_isCollapsed),
+        child: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: primary.withOpacity(0.12),
             borderRadius: BorderRadius.circular(22),
-            onTap: () => setState(() => _isCollapsed = !_isCollapsed),
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: primary.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(22),
-                border: Border.all(color: primary.withOpacity(0.35)),
-              ),
-              child: Icon(
-                _isCollapsed ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
-                size: 22,
-                color: primary,
-              ),
-            ),
+            border: Border.all(color: primary.withOpacity(0.35)),
+          ),
+          child: Icon(
+            _isCollapsed ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
+            size: 22,
+            color: primary,
           ),
         ),
       ),

@@ -1,3 +1,4 @@
+// lib/pages/pedido_detail_dialog.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -12,9 +13,6 @@ import '../services/gas_api.dart' as gas;
 class PedidoDetailDialog extends StatelessWidget {
   final dynamic pedido; // normalmente é um Map<String, dynamic>
   final List<Map<String, String>> produtosParsed;
-
-  /// API do GAS (com alias para evitar conflito de nomes)
-  final gas.GasApi _gas = gas.GasApi();
 
   PedidoDetailDialog({
     Key? key,
@@ -123,35 +121,34 @@ class PedidoDetailDialog extends StatelessWidget {
     final pedidoObj = Pedido.fromJson(Map<String, dynamic>.from(pedido));
 
     // Descontos (cupom e gift card)
-double totalDesconto = 0.0;
-String? descontoLabel;
+    double totalDesconto = 0.0;
+    String? descontoLabel;
 
-final subTotalVal = _toDouble(pedido['subTotal']);
-final cupomCodigo = pedido['AG']?.toString();
-final cupomValor = _toDouble(pedido['AH']); // pode ser % ou valor fixo
-final cupomTipo = pedido['AI']?.toString(); // "percent" ou "fixed_cart"
+    final subTotalVal = _toDouble(pedido['subTotal']);
+    final cupomCodigo = pedido['AG']?.toString();
+    final cupomValor = _toDouble(pedido['AH']); // pode ser % ou valor fixo
+    final cupomTipo = pedido['AI']?.toString(); // "percent" ou "fixed_cart"
 
-if (cupomCodigo != null && cupomCodigo.isNotEmpty && cupomValor > 0) {
-  if (cupomTipo == 'percent') {
-    // desconto percentual
-    totalDesconto += subTotalVal * (cupomValor / 100.0);
-    descontoLabel = 'Cupom ($cupomCodigo - ${cupomValor.toStringAsFixed(0)}%)';
-  } else {
-    // desconto fixo
-    totalDesconto += cupomValor;
-    descontoLabel = 'Cupom ($cupomCodigo - R\$ ${cupomValor.toStringAsFixed(2)})';
-  }
-}
+    if (cupomCodigo != null && cupomCodigo.isNotEmpty && cupomValor > 0) {
+      if (cupomTipo == 'percent') {
+        // desconto percentual
+        totalDesconto += subTotalVal * (cupomValor / 100.0);
+        descontoLabel = 'Cupom ($cupomCodigo - ${cupomValor.toStringAsFixed(0)}%)';
+      } else {
+        // desconto fixo
+        totalDesconto += cupomValor;
+        descontoLabel = 'Cupom ($cupomCodigo - R\$ ${cupomValor.toStringAsFixed(2)})';
+      }
+    }
 
-// Gift Card (se vier negativo no backend, tratamos como desconto)
-final giftCardDesconto = pedidoObj.descontoGiftCard;
-if (giftCardDesconto != null && giftCardDesconto < 0) {
-  totalDesconto += giftCardDesconto.abs();
-  descontoLabel = (descontoLabel == null)
-      ? 'Cartão Presente'
-      : '$descontoLabel + Cartão Presente';
-}
-
+    // Gift Card (se vier negativo no backend, tratamos como desconto)
+    final giftCardDesconto = pedidoObj.descontoGiftCard;
+    if (giftCardDesconto != null && giftCardDesconto < 0) {
+      totalDesconto += giftCardDesconto.abs();
+      descontoLabel = (descontoLabel == null)
+          ? 'Cartão Presente'
+          : '$descontoLabel + Cartão Presente';
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -173,13 +170,12 @@ if (giftCardDesconto != null && giftCardDesconto < 0) {
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        // Ícone aparece SEMPRE; a função já bloqueia a impressão fora do Windows com um snackbar
         actions: [
           IconButton(
             icon: const Icon(Icons.print, color: Colors.white),
             tooltip: 'Imprimir',
             onPressed: () async {
-              await printDirectly(context, pedido, produtosParsed); // manual => não marca no Sheets
+              await printDirectly(context, pedido, produtosParsed);
             },
           ),
         ],
@@ -562,7 +558,6 @@ if (giftCardDesconto != null && giftCardDesconto < 0) {
                   style: const pw.TextStyle(fontSize: 6, color: PdfColors.black),
                   textAlign: pw.TextAlign.center),
               pw.SizedBox(height: 2),
-              // tentativa de "cut" (não tem efeito em PDF, mas deixei caso precise)
               pw.Text('\x1D\x56\x00', style: const pw.TextStyle(fontSize: 0)),
             ],
           );
@@ -577,17 +572,16 @@ if (giftCardDesconto != null && giftCardDesconto < 0) {
         onLayout: (_) => pdf.save(),
       );
 
-      // feedback de UI
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Impressão enviada com sucesso!'), duration: Duration(seconds: 3)),
       );
 
-      // Marca no Sheets somente se solicitado (para a sua lógica: automático = true / manual = false)
+      // Marca no Sheets somente se solicitado
       if (markSheets) {
         final String id = (pedido['id'] ?? '').toString().trim();
         if (id.isNotEmpty) {
           try {
-            await _gas.markPrintedBarreiro(id); // não retorna bool; apenas aguardamos
+            await gas.GasApi.markPrinted(id); // MÉTODO ESTÁTICO CORRETO
           } catch (e) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -628,7 +622,6 @@ if (giftCardDesconto != null && giftCardDesconto < 0) {
     if (printers.isEmpty) {
       throw Exception('Nenhuma impressora encontrada.');
     }
-    // tenta achar EPSON/TM-T20X; se não achar, usa a primeira
     final epsonPrinter = printers.firstWhere(
       (p) => p.name.toLowerCase().contains('epson') || p.name.toLowerCase().contains('tm-t20x'),
       orElse: () => printers.first,

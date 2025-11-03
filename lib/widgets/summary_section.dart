@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
-import '../../globals.dart'; // currentUser
+import '../../globals.dart'; // ← currentUserGlobal
 import '../models/pedido_state.dart';
 
 class SummarySection extends StatelessWidget {
@@ -38,7 +38,7 @@ class SummarySection extends StatelessWidget {
   Future<void> _log(String message) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final unidade = (currentUser?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase();
+      final unidade = (currentUserGlobal?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase(); // CORRIGIDO
       final appDir = Directory('${dir.path}/ERPUnificado/$unidade');
       if (!appDir.existsSync()) appDir.createSync(recursive: true);
 
@@ -68,7 +68,7 @@ class SummarySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final primaryColor = const Color(0xFFF28C38);
     final successColor = Colors.green.shade600;
-    final unidade = currentUser?.unidade ?? 'CD';
+    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
 
     String? paymentText;
     bool isPix = false;
@@ -146,7 +146,10 @@ class SummarySection extends StatelessWidget {
                 : null,
             decoration: _inputDecoration('Método de Pagamento', Icons.payment),
             items: pedido.availablePaymentMethods
-                .map((m) => DropdownMenuItem(value: m['title'], child: Text(m['title'])))
+                .map((m) => DropdownMenuItem(
+                      value: m['title'] ?? '', // CORRIGIDO: String? → String
+                      child: Text(m['title'] ?? ''),
+                    ))
                 .toList(),
             onChanged: (v) {
               if (v != null) {

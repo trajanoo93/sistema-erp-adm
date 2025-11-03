@@ -2,7 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
-import '../services/gas_api.dart';  // NOVO
+import '../services/gas_api.dart';
 import '../globals.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -25,7 +25,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
           child: FutureBuilder<List<Pedido>>(
-            future: GasApi.read(onlyUnprinted: false), // UNIFICADO POR CD!
+            future: GasApi.readPedidos(onlyUnprinted: false),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const Center(
@@ -52,7 +52,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 return const Center(child: Text('Nenhum pedido agendado para hoje.'));
               }
 
-              final pedidosValidos = pedidosDoDia.where((p) => 
+              final pedidosValidos = pedidosDoDia.where((p) =>
                 !['cancelado', 'Cancelado'].contains(p.status?.trim())
               ).toList();
 
@@ -85,7 +85,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // === FILTROS E CÁLCULOS (AGORA COM OBJETO Pedido) ===
   List<Pedido> _filtrarPedidosDoDia(List<Pedido> pedidos, String today) {
     return pedidos.where((p) {
       final dataRaw = p.dataAgendamento ?? p.data ?? '';
@@ -126,8 +125,8 @@ class _DashboardPageState extends State<DashboardPage> {
       "18:00 - 21:00": 0,
     };
     for (var p in pedidos) {
-      final horario = p.horarioAgendamento;
-      if (horario != null && slots.containsKey(horario)) {
+      final horario = p.horarioAgendamento ?? '';
+      if (slots.containsKey(horario)) {
         slots[horario] = slots[horario]! + 1;
       }
     }
@@ -150,7 +149,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return count;
   }
 
-  // === WIDGETS (iguais, só com pequenos ajustes de segurança) ===
   Widget _buildMetricsCard(double totalValue, int totalOrders) {
     return Card(
       elevation: 4,
@@ -185,8 +183,8 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildPedidosPorSlotCard(Map<String, int> slots) {
-    final maxY = slots.values.isNotEmpty 
-        ? (slots.values.reduce((a, b) => a > b ? a : b) + 2.0).toDouble() 
+    final maxY = slots.values.isNotEmpty
+        ? (slots.values.reduce((a, b) => a > b ? a : b) + 2.0).toDouble()
         : 10.0;
 
     final keys = slots.keys.toList();

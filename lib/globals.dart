@@ -1,5 +1,6 @@
 // lib/globals.dart
 
+/// Modelo de usuário autenticado
 class AppUser {
   final int id;
   final String nome;
@@ -10,12 +11,12 @@ class AppUser {
   final String updateStatusAction;
   final String baseScriptUrl;
 
-  // NOVO: storeId dinâmico
+  /// StoreId dinâmico: "sion", "lagoa_santa", "barreiro"
   String get storeId {
     return unidade.toLowerCase().replaceAll(' ', '_');
   }
 
-  AppUser({
+  const AppUser({
     required this.id,
     required this.nome,
     required this.unidade,
@@ -27,7 +28,7 @@ class AppUser {
   });
 }
 
-// === DADOS DOS USUÁRIOS (MANTIDOS, MAS AGORA COM storeId DINÂMICO) ===
+/// === DADOS DOS USUÁRIOS (com storeId dinâmico) ===
 final Map<int, AppUser> appUsers = {
   110: AppUser(
     id: 110,
@@ -61,13 +62,13 @@ final Map<int, AppUser> appUsers = {
   ),
 };
 
-// URL base comum
+/// URL base comum (padrão)
 const String defaultBaseScriptUrl = 'https://script.google.com/macros/s/AKfycbz4J0iFumPBam_dSDAra31NHMJ29ze-Ykf64JkjqLTqRukR7j0MF5_tZe2Q-_BZgijW/exec';
 
-// Variáveis globais
-AppUser? currentUser;
+/// === VARIÁVEL GLOBAL DO USUÁRIO ATUAL ===
+AppUser? currentUserGlobal;
 
-// === FUNÇÕES GLOBAIS DINÂMICAS ===
-String getCurrentStoreId() => currentUser?.storeId ?? '';
-String getCurrentUnidade() => currentUser?.unidade ?? '';
-bool isLoggedIn() => currentUser != null;
+/// === FUNÇÕES GLOBAIS DE ACESSO RÁPIDO ===
+String getCurrentStoreId() => currentUserGlobal?.storeId ?? '';
+String getCurrentUnidade() => currentUserGlobal?.unidade ?? '';
+bool isLoggedIn() => currentUserGlobal != null;

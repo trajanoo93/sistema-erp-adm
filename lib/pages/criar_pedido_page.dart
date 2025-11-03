@@ -1,17 +1,21 @@
+// lib/pages/criar_pedido_page.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:erp_painel/models/pedido_state.dart';
-import 'package:erp_painel/services/criar_pedido_service.dart';
-import 'package:erp_painel/widgets/customer_section.dart';
-import 'package:erp_painel/widgets/product_section.dart';
-import 'package:erp_painel/widgets/address_section.dart';
-import 'package:erp_painel/widgets/scheduling_section.dart';
-import 'package:erp_painel/widgets/summary_section.dart';
-import 'package:erp_painel/widgets/product_selection_dialog.dart';
+import '../globals.dart';
+import '../models/pedido_state.dart';
+import '../services/criar_pedido_service.dart';
+import '../services/criar_pedido_gas.dart';
+import '../widgets/customer_section.dart';
+import '../widgets/product_section.dart';
+import '../widgets/address_section.dart';
+import '../widgets/scheduling_section.dart';
+import '../widgets/summary_section.dart';
+import '../widgets/product_selection_dialog.dart';
 
 // Normaliza data para YYYY-MM-DD
 String normalizeYmd(String dateStr) {
@@ -65,6 +69,9 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
   Timer? _debounce;
   late Future<void> _initFuture;
 
+  // Configuração da unidade autenticada
+  late final AppUser _userConfig;
+
   static const List<String> _validPaymentMethods = [
     'Pix',
     'Cartão de Crédito On-line',
@@ -76,6 +83,15 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
   @override
   void initState() {
     super.initState();
+    final user = currentUserGlobal;
+    if (user == null) {
+      // Redireciona para login se não autenticado
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.of(context).pushReplacementNamed('/login');
+      });
+      return;
+    }
+    _userConfig = user;
     _initFuture = _initializePedido();
   }
 
@@ -84,6 +100,21 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
     _pedido.schedulingDate = DateFormat('yyyy-MM-dd').format(DateTime.now());
     _pedido.shippingMethod = 'delivery';
     _pedido.schedulingTime = '09:00 - 12:00';
+    _pedido.storeFinal = 'Unidade ${_userConfig.unidade}';
+    _pedido.pickupStoreId = _getPickupStoreId(_userConfig.unidade);
+  }
+
+  String _getPickupStoreId(String unidade) {
+    switch (unidade) {
+      case 'Barreiro':
+        return '110727';
+      case 'Sion':
+        return '127163';
+      case 'Lagoa Santa':
+        return '131813';
+      default:
+        return '110727';
+    }
   }
 
   @override
@@ -185,7 +216,6 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
     });
   }
 
-
   Future<void> _checkStoreByCep() async {
     final cep = _pedido.cepController.text.replaceAll(RegExp(r'\D'), '').trim();
     if (cep.length != 8 && _pedido.shippingMethod != 'pickup') {
@@ -204,10 +234,11 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
     if (mounted) setState(() => _isLoading = true);
     try {
       final normalizedDate = normalizeYmd(_pedido.schedulingDate);
+      final unitName = 'Unidade ${_userConfig.unidade}';
       final requestBody = {
         'cep': cep,
         'shipping_method': _pedido.shippingMethod,
-        'pickup_store': _pedido.shippingMethod == 'pickup' ? 'Unidade Barreiro' : '',
+        'pickup_store': _pedido.shippingMethod == 'pickup' ? unitName : '',
         'delivery_date': _pedido.shippingMethod == 'delivery' ? normalizedDate : '',
         'pickup_date': _pedido.shippingMethod == 'pickup' ? normalizedDate : '',
       };
@@ -218,6 +249,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
       ).timeout(const Duration(seconds: 15), onTimeout: () {
         throw Exception('Timeout ao buscar opções de entrega');
       });
+
       double shippingCost = 0.0;
       if (_pedido.shippingMethod == 'delivery') {
         final costResponse = await http.get(
@@ -230,22 +262,24 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
           final costData = jsonDecode(costResponse.body);
           if (costData['status'] == 'success' && costData['shipping_options'] != null && costData['shipping_options'].isNotEmpty) {
             shippingCost = double.tryParse(costData['shipping_options'][0]['cost']?.toString() ?? '0.0') ?? 0.0;
-          } else {
-            shippingCost = 0.0;
           }
-        } else {
-          throw Exception('Erro ao buscar custo de frete: ${costResponse.statusCode} - ${costResponse.body}');
         }
       }
+
       if (storeResponse.statusCode == 200) {
         final data = jsonDecode(storeResponse.body);
-        final newStoreFinal = data['effective_store_final']?.toString() ?? data['store_final']?.toString() ?? 'Unidade Barreiro';
+        final newStoreFinal = data['effective_store_final']?.toString() ?? data['store_final']?.toString() ?? unitName;
+        final pickupId = _pedido.shippingMethod == 'pickup'
+            ? _getPickupStoreId(_userConfig.unidade)
+            : data['pickup_store_id']?.toString() ?? _getPickupStoreId(_userConfig.unidade);
+
         if (mounted) {
           setState(() {
-            _pedido.storeFinal = _pedido.shippingMethod == 'pickup' ? 'Unidade Barreiro' : newStoreFinal;
-            _pedido.pickupStoreId = _pedido.shippingMethod == 'pickup' ? '110727' : data['pickup_store_id']?.toString() ?? '110727';
+            _pedido.storeFinal = _pedido.shippingMethod == 'pickup' ? unitName : newStoreFinal;
+            _pedido.pickupStoreId = pickupId;
             _pedido.shippingCost = _pedido.shippingMethod == 'pickup' ? 0.0 : shippingCost;
             _pedido.shippingCostController.text = _pedido.shippingCost.toStringAsFixed(2);
+
             final rawPaymentMethods = List<Map<String, dynamic>>.from(data['payment_methods'] ?? []);
             _pedido.availablePaymentMethods = [];
             final seenTitles = <String>{};
@@ -266,8 +300,10 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
                 seenTitles.add(title);
               }
             }
+
             final paymentAccounts = (data['payment_accounts'] as Map?)?.map((key, value) => MapEntry(key.toString(), value?.toString() ?? '')) ?? {'stripe': 'stripe', 'pagarme': 'central'};
             _pedido.paymentAccounts = paymentAccounts;
+
             if (_pedido.selectedPaymentMethod.isNotEmpty &&
                 !_pedido.availablePaymentMethods.any((m) => m['title'] == _pedido.selectedPaymentMethod)) {
               _pedido.selectedPaymentMethod = _pedido.availablePaymentMethods.isNotEmpty
@@ -277,15 +313,16 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
           });
         }
       } else {
-        throw Exception('Erro ao buscar opções de entrega: ${storeResponse.statusCode} - ${storeResponse.body}');
+        throw Exception('Erro ao buscar opções de entrega: ${storeResponse.statusCode}');
       }
     } catch (e, stackTrace) {
+      debugPrint('Erro em _checkStoreByCep [${_userConfig.unidade}]: $e\n$stackTrace');
       if (mounted) {
         setState(() {
           _pedido.shippingCost = 0.0;
           _pedido.shippingCostController.text = '0.00';
-          _pedido.storeFinal = _pedido.shippingMethod == 'pickup' ? 'Unidade Barreiro' : '';
-          _pedido.pickupStoreId = _pedido.shippingMethod == 'pickup' ? '110727' : '';
+          _pedido.storeFinal = _pedido.shippingMethod == 'pickup' ? 'Unidade ${_userConfig.unidade}' : '';
+          _pedido.pickupStoreId = _pedido.shippingMethod == 'pickup' ? _getPickupStoreId(_userConfig.unidade) : '';
           _pedido.availablePaymentMethods = [
             {'id': 'pagarme_custom_pix', 'title': 'Pix'},
             {'id': 'stripe', 'title': 'Cartão de Crédito On-line'},
@@ -294,12 +331,6 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
             {'id': 'custom_e876f567c151864', 'title': 'Vale Alimentação'},
           ];
           _pedido.paymentAccounts = {'stripe': 'stripe', 'pagarme': 'central'};
-          if (_pedido.selectedPaymentMethod.isNotEmpty &&
-              !_pedido.availablePaymentMethods.any((m) => m['title'] == _pedido.selectedPaymentMethod)) {
-            _pedido.selectedPaymentMethod = _pedido.availablePaymentMethods.isNotEmpty
-                ? _pedido.availablePaymentMethods.first['title'] ?? ''
-                : '';
-          }
         });
       }
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erro: $e')));
@@ -313,6 +344,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
     final normalizedDate = normalizeYmd(_pedido.schedulingDate);
     final normalizedTime = ensureTimeRange(_pedido.schedulingTime);
     final phone = _pedido.phoneController.text.replaceAll(RegExp(r'\D'), '').trim();
+
     if (phone.length != 11) errors.add('Insira um número de telefone válido (11 dígitos com DDD)');
     if (_pedido.nameController.text.isEmpty) errors.add('O nome do cliente é obrigatório');
     if (_pedido.shippingMethod == 'delivery' && _pedido.cepController.text.replaceAll(RegExp(r'\D'), '').length != 8) {
@@ -337,6 +369,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
     if (_pedido.shippingMethod.isEmpty) errors.add('Selecione o método de entrega');
     if (_pedido.selectedPaymentMethod.isEmpty) errors.add('Selecione um método de pagamento');
     if (normalizedDate.isEmpty || normalizedTime.isEmpty) errors.add('Selecione a data e o horário de entrega/retirada');
+
     if (errors.isNotEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(errors.join('\n')), duration: const Duration(seconds: 5), backgroundColor: Colors.redAccent),
@@ -344,24 +377,25 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
       if (mounted) setState(() => _isLoading = false);
       return;
     }
+
     if (mounted) setState(() => _isLoading = true);
     try {
-      final cep = _pedido.cepController.text.replaceAll(RegExp(r'\D'), '').trim();
-      final storeFinal = _pedido.shippingMethod == 'pickup' ? 'Unidade Barreiro' : _pedido.storeFinal;
-      final storeId = _pedido.shippingMethod == 'pickup' ? '110727' : _pedido.pickupStoreId;
+      final storeFinal = _pedido.shippingMethod == 'pickup' ? 'Unidade ${_userConfig.unidade}' : _pedido.storeFinal;
+      final storeId = _pedido.shippingMethod == 'pickup' ? _getPickupStoreId(_userConfig.unidade) : _pedido.pickupStoreId;
+
       final service = CriarPedidoService();
-      final billingCompany = '';
       final methodSlug = _paymentSlugFromLabel(_pedido.selectedPaymentMethod);
+
       final order = await service.createOrder(
         customerName: _pedido.nameController.text,
         customerEmail: _pedido.emailController.text,
         customerPhone: phone,
-        billingCompany: billingCompany,
+        billingCompany: '',
         products: _pedido.products,
         shippingMethod: _pedido.shippingMethod,
         storeFinal: storeFinal,
         pickupStoreId: storeId,
-        billingPostcode: cep,
+        billingPostcode: _pedido.cepController.text.replaceAll(RegExp(r'\D'), ''),
         billingAddress1: _pedido.addressController.text,
         billingNumber: _pedido.numberController.text,
         billingAddress2: _pedido.complementController.text,
@@ -376,6 +410,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
         paymentAccountStripe: _pedido.paymentAccounts['stripe'] ?? 'stripe',
         paymentAccountPagarme: _pedido.paymentAccounts['pagarme'] ?? 'central',
       );
+
       String? savedPaymentInstructions;
       if (methodSlug == 'pagarme_custom_pix' || methodSlug == _pedido.paymentAccounts['stripe']) {
         final totalBeforeDiscount = _pedido.products.fold<double>(
@@ -384,6 +419,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
         ) + _pedido.shippingCost;
         final discountAmount = _pedido.isCouponValid ? _pedido.discountAmount : 0.0;
         final totalAmount = totalBeforeDiscount - discountAmount;
+
         final paymentLinkResult = await _generatePaymentLink(
           customerName: _pedido.nameController.text,
           phoneNumber: _pedido.phoneController.text,
@@ -392,12 +428,14 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
           paymentMethod: methodSlug == 'pagarme_custom_pix' ? 'Pix' : 'Stripe',
           orderId: order['id'].toString(),
         );
+
         if (paymentLinkResult != null) {
           savedPaymentInstructions = methodSlug == 'pagarme_custom_pix'
               ? jsonEncode({'type': 'pix', 'text': paymentLinkResult['text'] ?? ''})
               : jsonEncode({'type': 'stripe', 'url': paymentLinkResult['url'] ?? ''});
         }
       }
+
       if (mounted) {
         setState(() {
           _resultMessage = 'Pedido #${order['id']} criado com sucesso!${savedPaymentInstructions != null ? '\nInstruções de pagamento geradas.' : ''}';
@@ -406,8 +444,8 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
           _pedido.products.clear();
           _pedido.shippingMethod = 'delivery';
           _pedido.selectedPaymentMethod = '';
-          _pedido.storeFinal = '';
-          _pedido.pickupStoreId = '';
+          _pedido.storeFinal = 'Unidade ${_userConfig.unidade}';
+          _pedido.pickupStoreId = _getPickupStoreId(_userConfig.unidade);
           _pedido.shippingCost = 0.0;
           _pedido.shippingCostController.text = '0.00';
           _pedido.showNotesField = false;
@@ -422,6 +460,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
         });
       }
     } catch (error, stackTrace) {
+      debugPrint('Erro ao criar pedido [${_userConfig.unidade}]: $error\n$stackTrace');
       if (mounted) {
         setState(() => _resultMessage = 'Erro ao criar pedido: $error');
       }
@@ -447,6 +486,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
     final amountInCents = (amount * 100).toInt();
     final proxyUnit = Uri.encodeComponent(storeUnit);
     final endpoint = 'https://aogosto.com.br/proxy/$proxyUnit/${paymentMethod == 'Pix' ? 'pagarme.php' : 'stripe.php'}';
+
     try {
       if (paymentMethod == 'Pix') {
         final payloadPagarMe = {
@@ -476,25 +516,15 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
           body: jsonEncode(payloadPagarMe),
         );
         if (response.statusCode != 200) {
-          throw Exception('Erro ao criar pedido PIX: status ${response.statusCode} - ${response.body}');
-        }
-        if (response.body.startsWith('<!DOCTYPE') || response.body.contains('<html')) {
-          throw Exception('Resposta inválida do servidor (HTML em vez de JSON): ${response.body}');
+          throw Exception('Erro ao criar pedido PIX: status ${response.statusCode}');
         }
         final data = jsonDecode(response.body);
-        if (data['charges'] != null && data['charges'].isNotEmpty && data['charges'][0]['last_transaction'] != null) {
-          final pixInfo = data['charges'][0]['last_transaction'];
-          final pixText = pixInfo['text']?.toString() ?? '';
-          if (pixText.isEmpty) {
-            final fallbackText = pixInfo['qr_code']?.toString() ?? '';
-            if (fallbackText.isEmpty) {
-              throw Exception('Nenhuma linha digitável ou QR code retornado para Pix.');
-            }
-            return {'type': 'pix', 'text': fallbackText};
-          }
+        final pixText = data['charges']?[0]?['last_transaction']?['text']?.toString() ?? '';
+        if (pixText.isNotEmpty) {
           return {'type': 'pix', 'text': pixText};
         } else {
-          throw Exception('Nenhuma transação PIX retornada ou estrutura de resposta inválida: ${jsonEncode(data)}');
+          final fallback = data['charges']?[0]?['last_transaction']?['qr_code']?.toString() ?? '';
+          return {'type': 'pix', 'text': fallback};
         }
       } else {
         final payloadStripe = {
@@ -510,24 +540,14 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
           body: jsonEncode(payloadStripe),
         );
         if (response.statusCode != 200) {
-          throw Exception('Erro ao criar link Stripe: status ${response.statusCode} - ${response.body}');
-        }
-        if (response.body.startsWith('<!DOCTYPE') || response.body.contains('<html')) {
-          throw Exception('Resposta inválida do servidor (HTML em vez de JSON): ${response.body}');
+          throw Exception('Erro ao criar link Stripe: status ${response.statusCode}');
         }
         final data = jsonDecode(response.body);
-        if (data['payment_link'] != null && data['payment_link']['url'] != null) {
-          return {'type': 'stripe', 'url': data['payment_link']['url']};
-        } else {
-          throw Exception('Nenhuma URL de checkout retornada: ${jsonEncode(data)}');
-        }
+        return {'type': 'stripe', 'url': data['payment_link']?['url']};
       }
     } catch (error) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Erro ao gerar link de pagamento: $error'),
-          backgroundColor: Colors.redAccent,
-        ),
+        SnackBar(content: Text('Erro ao gerar link de pagamento: $error'), backgroundColor: Colors.redAccent),
       );
       return null;
     }
@@ -548,7 +568,6 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
         try {
           return DateFormat('MMMM d, yyyy', 'en_US').parse(dateString);
         } catch (e) {
-          debugPrint('Erro ao parsear data: $dateString, erro: $e');
           return null;
         }
       }
@@ -559,6 +578,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
   Widget build(BuildContext context) {
     final totalOriginal = _pedido.calculateTotal(applyDiscount: false);
     final totalWithDiscount = _pedido.calculateTotal(applyDiscount: true);
+
     return Scaffold(
       appBar: null,
       body: Column(
@@ -621,75 +641,76 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                       ExpansionPanelList(
-  elevation: 0,
-  expandedHeaderPadding: EdgeInsets.zero,
-  expansionCallback: (panelIndex, isExpanded) {
-    if (mounted) {
-      setState(() => _pedido.isAddressSectionExpanded = !isExpanded);
-    }
-  },
-  children: [
-    ExpansionPanel(
-      headerBuilder: (context, isExpanded) => ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        title: Text(
-          'Endereço do Cliente',
-          style: GoogleFonts.poppins(
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-            color: Colors.black87,
-          ),
-        ),
-        trailing: AnimatedRotation(
-          turns: isExpanded ? 0.5 : 0,
-          duration: const Duration(milliseconds: 200),
-          child: Icon(Icons.arrow_drop_down_rounded, color: primaryColor, size: 24),
-        ),
-      ),
-      body: AddressSection(
-        cepController: _pedido.cepController,
-        addressController: _pedido.addressController,
-        numberController: _pedido.numberController,
-        complementController: _pedido.complementController,
-        neighborhoodController: _pedido.neighborhoodController,
-        cityController: _pedido.cityController,
-        onChanged: (_) {},
-        onShippingCostUpdated: (cost) {
-  if (mounted) {
-    setState(() {
-      _pedido.shippingCost = cost;
-      _pedido.shippingCostController.text = cost.toStringAsFixed(2);
-    });
-  }
-},
-        onStoreUpdated: (storeFinal, pickupStoreId) {
-  if (mounted) {
-    setState(() {
-      _pedido.storeFinal = storeFinal;
-      _pedido.pickupStoreId = pickupStoreId;
-    });
-  }
-},
-        externalShippingCost: _pedido.shippingCost,
-        shippingMethod: _pedido.shippingMethod,
-        setStateCallback: () {},
-        checkStoreByCep: _checkStoreByCep,
-        pedido: _pedido,
-        onReset: () {
-          _pedido.cepController.clear();
-          _pedido.addressController.clear();
-          _pedido.numberController.clear();
-          _pedido.complementController.clear();
-          _pedido.neighborhoodController.clear();
-          _pedido.cityController.clear();
-          if (mounted) setState(() {});
-        },
-      ),
-      isExpanded: _pedido.isAddressSectionExpanded,
-    ),
-  ],
-),                      const SizedBox(height: 16),
+                        ExpansionPanelList(
+                          elevation: 0,
+                          expandedHeaderPadding: EdgeInsets.zero,
+                          expansionCallback: (panelIndex, isExpanded) {
+                            if (mounted) {
+                              setState(() => _pedido.isAddressSectionExpanded = !isExpanded);
+                            }
+                          },
+                          children: [
+                            ExpansionPanel(
+                              headerBuilder: (context, isExpanded) => ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                title: Text(
+                                  'Endereço do Cliente',
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+                                trailing: AnimatedRotation(
+                                  turns: isExpanded ? 0.5 : 0,
+                                  duration: const Duration(milliseconds: 200),
+                                  child: Icon(Icons.arrow_drop_down_rounded, color: primaryColor, size: 24),
+                                ),
+                              ),
+                              body: AddressSection(
+                                cepController: _pedido.cepController,
+                                addressController: _pedido.addressController,
+                                numberController: _pedido.numberController,
+                                complementController: _pedido.complementController,
+                                neighborhoodController: _pedido.neighborhoodController,
+                                cityController: _pedido.cityController,
+                                onChanged: (_) {},
+                                onShippingCostUpdated: (cost) {
+                                  if (mounted) {
+                                    setState(() {
+                                      _pedido.shippingCost = cost;
+                                      _pedido.shippingCostController.text = cost.toStringAsFixed(2);
+                                    });
+                                  }
+                                },
+                                onStoreUpdated: (storeFinal, pickupStoreId) {
+                                  if (mounted) {
+                                    setState(() {
+                                      _pedido.storeFinal = storeFinal;
+                                      _pedido.pickupStoreId = pickupStoreId;
+                                    });
+                                  }
+                                },
+                                externalShippingCost: _pedido.shippingCost,
+                                shippingMethod: _pedido.shippingMethod,
+                                setStateCallback: () {},
+                                checkStoreByCep: _checkStoreByCep,
+                                pedido: _pedido,
+                                onReset: () {
+                                  _pedido.cepController.clear();
+                                  _pedido.addressController.clear();
+                                  _pedido.numberController.clear();
+                                  _pedido.complementController.clear();
+                                  _pedido.neighborhoodController.clear();
+                                  _pedido.cityController.clear();
+                                  if (mounted) setState(() {});
+                                },
+                              ),
+                              isExpanded: _pedido.isAddressSectionExpanded,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
                         AnimatedContainer(
                           duration: const Duration(milliseconds: 300),
                           curve: Curves.easeOutCubic,
@@ -717,7 +738,9 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
                             onAddProduct: () async {
                               final selectedProduct = await showDialog<Map<String, dynamic>>(
                                 context: context,
-                                builder: (context) => const ProductSelectionDialog(),
+                                builder: (context) => ProductSelectionDialog(
+                                  gasService: CriarPedidoGas(user: _userConfig),
+                                ),
                               );
                               if (selectedProduct != null && mounted) {
                                 setState(() {

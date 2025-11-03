@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:path_provider/path_provider.dart';
-import '../../globals.dart'; // ← Importa currentUser
+import '../../globals.dart'; // ← Importa currentUserGlobal
 
 class CustomerSection extends StatelessWidget {
   final TextEditingController phoneController;
@@ -34,7 +34,7 @@ class CustomerSection extends StatelessWidget {
   Future<void> logToFile(String message) async {
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final unidade = currentUser?.unidade ?? 'Desconhecida';
+      final unidade = currentUserGlobal?.unidade ?? 'Desconhecida'; // CORRIGIDO
       final sanitizedUnidade = unidade.replaceAll(' ', '_').toLowerCase();
       final appDir = Directory('${directory.path}/ERPUnificado/$sanitizedUnidade');
       if (!appDir.existsSync()) appDir.createSync(recursive: true);
@@ -49,7 +49,7 @@ class CustomerSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primaryColor = const Color(0xFFF28C38);
-    final unidade = currentUser?.unidade ?? 'CD';
+    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
-import '../../globals.dart'; // ← currentUser
+import '../../globals.dart'; // ← currentUserGlobal
 import '../models/pedido_state.dart';
 
 class AddressSection extends StatefulWidget {
@@ -110,8 +110,8 @@ class _AddressSectionState extends State<AddressSection> {
 
   void _updatePickupInfo() {
     if (!mounted) return;
-    final unidade = currentUser!.unidade;
-    final storeId = currentUser!.storeId;
+    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
+    final storeId = currentUserGlobal?.storeId ?? ''; // CORRIGIDO
     setState(() {
       _storeIndication = 'Retirada na loja: $unidade';
     });
@@ -160,7 +160,7 @@ class _AddressSectionState extends State<AddressSection> {
         }
 
         // Atualiza indicação de loja
-        final storeFinal = widget.pedido?.storeFinal ?? currentUser!.unidade;
+        final storeFinal = widget.pedido?.storeFinal ?? currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
         if (mounted) {
           setState(() {
             _storeIndication = widget.shippingMethod == 'delivery' && storeFinal.isNotEmpty
@@ -196,8 +196,8 @@ class _AddressSectionState extends State<AddressSection> {
     widget.onStoreUpdated('', '');
 
     if (widget.pedido != null) {
-      final unidade = currentUser!.unidade;
-      final storeId = currentUser!.storeId;
+      final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
+      final storeId = currentUserGlobal?.storeId ?? ''; // CORRIGIDO
 
       widget.pedido!.cepController.clear();
       widget.pedido!.addressController.clear();

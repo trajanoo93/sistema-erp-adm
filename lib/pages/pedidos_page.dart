@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../globals.dart';
 import '../services/gas_api.dart';
 import 'pedido_detail_dialog.dart';
+import 'auth_page.dart'; // <-- Adicionado: necessário para AuthPage
 
 class LtrTextField extends StatelessWidget {
   final String labelText;
@@ -108,7 +109,6 @@ class _PedidosPageState extends State<PedidosPage> {
   Timer? _fetchTimer;
 
   final List<String> _statusOptions = ['Todos', 'Registrado', 'Saiu pra Entrega', 'Concluído', 'Cancelado'];
-
   final List<String> _orderStatusOptions = [
     '-',
     'Registrado',
@@ -121,22 +121,18 @@ class _PedidosPageState extends State<PedidosPage> {
   bool _isFetching = false;
   final Set<String> _printingNow = {};
 
-  late GasApi _gasApi;
-
   @override
   void initState() {
     super.initState();
 
-    if (currentUser == null) {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const AuthPage()));
+    if (currentUserGlobal == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => AuthPage()), // <-- Removido 'const'
+        );
+      });
       return;
     }
-
-    // Inicializa GasApi com storeId dinâmico
-  _gasApi = GasApi(
-  user: currentUser!,
-  storeId: currentUser!.storeId,  // 100% DINÂMICO
-);
 
     final now = DateTime.now();
     _startDate = DateTime(now.year, now.month, now.day, 0, 0, 0);
@@ -169,11 +165,12 @@ class _PedidosPageState extends State<PedidosPage> {
     _endDateController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
-    _gasApi.dispose();
+    GasApi.dispose();
     super.dispose();
   }
 
-  String _canonicalId(String raw) {
+  String _canonicalId(String? raw) {
+    if (raw == null) return '';
     var s = raw.trim();
     if (s.endsWith('.0')) s = s.substring(0, s.length - 2);
     s = s.replaceAll(RegExp(r'[^0-9A-Za-z\-]'), '');
@@ -181,7 +178,7 @@ class _PedidosPageState extends State<PedidosPage> {
   }
 
   Future<void> _openPedidoSideSheet(Pedido pedido) async {
-    final produtosParsed = parseProdutos(pedido.produtos);
+    final produtosParsed = parseProdutos(pedido.produtos ?? '');
     await showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -268,22 +265,19 @@ class _PedidosPageState extends State<PedidosPage> {
   }
 
   Future<void> _fetchPedidosSilently() async {
-    if (_isFetching) {
-      debugPrint('Fetch já em execução; pulando ciclo.');
-      return;
-    }
+    if (_isFetching) return;
     _isFetching = true;
     IOSink? logSink;
     try {
-      final List<Pedido> newPedidos = await _gasApi.readPedidos();
+      final List<Pedido> newPedidos = await GasApi.readPedidos();
       final logFile = await _getLogFile();
       logSink = logFile.openWrite(mode: FileMode.append);
 
       final List<Pedido> problematic = [];
       for (var pedido in newPedidos) {
-        final logLine = 'Pedido ${pedido.id}: descontoGiftCard=${pedido.descontoGiftCard}, JSON=${jsonEncode(pedido.toJson())}\n';
+        final logLine = 'Pedido ${pedido.id}: giftDesconto=${pedido.giftDesconto}, JSON=${jsonEncode(pedido.toJson())}\n';
         logSink.write(logLine);
-        if (DateTime.tryParse(pedido.dataAgendamento) == null && pedido.dataAgendamento.isNotEmpty) {
+        if (DateTime.tryParse(pedido.dataAgendamento ?? '') == null && (pedido.dataAgendamento?.isNotEmpty ?? false)) {
           problematic.add(pedido);
           logSink.write('ERRO: Pedido ${pedido.id} tem data_agendamento inválida: ${pedido.dataAgendamento}\n');
         }
@@ -318,7 +312,7 @@ class _PedidosPageState extends State<PedidosPage> {
             if (problematic.isNotEmpty) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('${problematic.length} pedido(s) com data inválida. Verifique a seção de problemas.'),
+                  content: Text('${problematic.length} pedido(s) com data inválida.'),
                   duration: const Duration(seconds: 5),
                   backgroundColor: Colors.redAccent,
                 ),
@@ -326,10 +320,7 @@ class _PedidosPageState extends State<PedidosPage> {
             }
           });
           await _filterPedidos();
-          await _processNewPedidos(deduped);
         }
-      } else {
-        logSink.write('Nenhum novo pedido retornado\n');
       }
     } catch (e) {
       debugPrint('Erro ao buscar pedidos: $e');
@@ -341,77 +332,6 @@ class _PedidosPageState extends State<PedidosPage> {
     }
   }
 
-  Future<void> _processNewPedidos(List<Pedido> newPedidos) async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-
-    for (var pedido in newPedidos) {
-      final key = _canonicalId(pedido.id);
-      if (_printedPedidoIds.contains(key) || _printingNow.contains(key)) continue;
-
-      final dataAgendamento = _parseDateRobust(pedido.dataAgendamento);
-      if (dataAgendamento == null) {
-        await _writeLog(
-            'Pedido ${pedido.id} ignorado para impressão: data_agendamento inválida (${pedido.dataAgendamento}).',
-            context);
-        continue;
-      }
-      final agendamentoDate = DateTime(dataAgendamento.year, dataAgendamento.month, dataAgendamento.day);
-
-      if (agendamentoDate == today) {
-        _printingNow.add(key);
-        bool printedSuccessfully = false;
-        for (int attempt = 1; attempt <= 3; attempt++) {
-          try {
-            final produtosParsed = parseProdutos(pedido.produtos);
-            final dialog = PedidoDetailDialog(pedido: pedido.toJson(), produtosParsed: produtosParsed);
-            await dialog.printDirectly(
-              context,
-              pedido.toJson(),
-              produtosParsed,
-              markSheets: true,
-            );
-
-            await _gasApi.markPrinted(pedido.id);
-
-            setState(() => _printedPedidoIds.add(key));
-            await _savePrintedPedidoIds();
-            await _writeLog(
-                'Pedido ${pedido.id} impresso com sucesso na tentativa $attempt.', context);
-
-            printedSuccessfully = true;
-            break;
-          } catch (e) {
-            await _writeLog(
-                'Erro ao imprimir pedido ${pedido.id} na tentativa $attempt: $e', context);
-            if (attempt == 3 && mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Erro ao imprimir pedido #${pedido.id} após 3 tentativas: $e')),
-              );
-            }
-            await Future.delayed(const Duration(seconds: 2));
-          }
-        }
-        _printingNow.remove(key);
-        if (!printedSuccessfully) {
-          await _writeLog(
-              'Pedido ${pedido.id} não foi impresso após todas as tentativas.', context);
-        }
-      }
-    }
-  }
-
-  Future<void> _writeLog(String message, BuildContext context) async {
-    try {
-      final logFile = await _getLogFile();
-      final logSink = logFile.openWrite(mode: FileMode.append);
-      logSink.write('[${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}] $message\n');
-      await logSink.close();
-    } catch (e) {
-      debugPrint('Erro ao escrever log: $e');
-    }
-  }
-
   Future<void> _filterPedidos() async {
     if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
@@ -420,29 +340,18 @@ class _PedidosPageState extends State<PedidosPage> {
       if (_searchText.isNotEmpty) {
         final searchLower = _searchText.toLowerCase();
         tempList = tempList.where((pedido) {
-          final idStr = pedido.id.toLowerCase();
-          final nome = pedido.nome.toLowerCase();
+          final idStr = (pedido.id ?? '').toLowerCase();
+          final nome = (pedido.nome ?? '').toLowerCase();
           return idStr.contains(searchLower) || nome.contains(searchLower);
-        }).toList();
-      } else if (_startDate != null && _endDate != null) {
-        tempList = tempList.where((pedido) {
-          final dataStr = pedido.dataAgendamento;
-          if (dataStr.isEmpty) return true;
-          final dt = _parseDateRobust(dataStr);
-          if (dt == null) return true;
-          return dt.isAfter(_startDate!.subtract(const Duration(seconds: 1))) &&
-              dt.isBefore(_endDate!.add(const Duration(seconds: 1)));
         }).toList();
       }
 
       if (_selectedStatus != 'Todos') {
-        tempList = tempList
-            .where((pedido) => pedido.status.toLowerCase() == _selectedStatus.toLowerCase())
-            .toList();
+        tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() == _selectedStatus.toLowerCase()).toList();
       }
 
       if (_hideCompleted) {
-        tempList = tempList.where((pedido) => pedido.status.toLowerCase() != 'concluído').toList();
+        tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() != 'concluído').toList();
       }
 
       tempList.sort(_compareAgendamento);
@@ -475,12 +384,12 @@ class _PedidosPageState extends State<PedidosPage> {
     }
   }
 
-  DateTime? _parseAgendamentoToDateTime(String dataAgendamento, String horarioAgendamento) {
+  DateTime? _parseAgendamentoToDateTime(String? dataAgendamento, String? horarioAgendamento) {
     try {
-      if (dataAgendamento.isEmpty || horarioAgendamento.isEmpty) return null;
+      if (dataAgendamento?.isEmpty ?? true) return null;
       final date = _parseDateRobust(dataAgendamento);
       if (date == null) return null;
-      final horarioParts = horarioAgendamento.split(' - ');
+      final horarioParts = (horarioAgendamento ?? '').split(' - ');
       if (horarioParts.isEmpty || horarioParts[0].isEmpty) return null;
       final timeFormat = DateFormat('HH:mm');
       final time = timeFormat.parse(horarioParts[0].trim());
@@ -490,34 +399,35 @@ class _PedidosPageState extends State<PedidosPage> {
     }
   }
 
-  DateTime? _parseHorarioCriacao(String horario) {
+  DateTime? _parseHorarioCriacao(String? horario) {
     try {
-      if (horario.isEmpty) return null;
+      if (horario?.isEmpty ?? true) return null;
       final timeFormat = DateFormat('HH:mm');
-      return timeFormat.parse(horario);
+      return timeFormat.parse(horario!);
     } catch (_) {
       return null;
     }
   }
 
   int _compareAgendamento(Pedido a, Pedido b) {
-    final dataAgendamentoA = a.dataAgendamento.isNotEmpty ? a.dataAgendamento : a.data;
+    final dataAgendamentoA = a.dataAgendamento?.isNotEmpty == true ? a.dataAgendamento : a.data;
     final horarioAgendamentoA = a.horarioAgendamento;
-    final horarioA = a.horario;
-    final dataAgendamentoB = b.dataAgendamento.isNotEmpty ? b.dataAgendamento : b.data;
+    final dataAgendamentoB = b.dataAgendamento?.isNotEmpty == true ? b.dataAgendamento : b.data;
     final horarioAgendamentoB = b.horarioAgendamento;
-    final horarioB = b.horario;
 
     final dateTimeAgendamentoA = _parseAgendamentoToDateTime(dataAgendamentoA, horarioAgendamentoA);
     final dateTimeAgendamentoB = _parseAgendamentoToDateTime(dataAgendamentoB, horarioAgendamentoB);
-    final dateTimeCriacaoA = _parseHorarioCriacao(horarioA);
-    final dateTimeCriacaoB = _parseHorarioCriacao(horarioB);
 
     if (dateTimeAgendamentoA == null && dateTimeAgendamentoB == null) return 0;
     if (dateTimeAgendamentoA == null) return 1;
     if (dateTimeAgendamentoB == null) return -1;
-    final compareAgendamento = dateTimeAgendamentoA.compareTo(dateTimeAgendamentoB);
-    if (compareAgendamento != 0) return compareAgendamento;
+    final compare = dateTimeAgendamentoA.compareTo(dateTimeAgendamentoB);
+    if (compare != 0) return compare;
+
+    final horarioA = a.horario;
+    final horarioB = b.horario;
+    final dateTimeCriacaoA = _parseHorarioCriacao(horarioA);
+    final dateTimeCriacaoB = _parseHorarioCriacao(horarioB);
 
     if (dateTimeCriacaoA == null && dateTimeCriacaoB == null) return 0;
     if (dateTimeCriacaoA == null) return 1;
@@ -555,7 +465,8 @@ class _PedidosPageState extends State<PedidosPage> {
     }
   }
 
-  String _formatHorario(String raw) {
+  String _formatHorario(String? raw) {
+    if (raw == null) return '';
     final reg = RegExp(r'(\d{2}):(\d{2}):(\d{2})');
     final match = reg.firstMatch(raw);
     if (match != null) {
@@ -568,8 +479,8 @@ class _PedidosPageState extends State<PedidosPage> {
     return raw;
   }
 
-  String _formatoDataAgendamento(String iso) {
-    if (iso.isEmpty) return 'Data não informada';
+  String _formatoDataAgendamento(String? iso) {
+    if (iso == null || iso.isEmpty) return 'Data não informada';
     final dt = _parseDateRobust(iso);
     if (dt != null) {
       return DateFormat('dd/MM/yyyy').format(dt);
@@ -577,8 +488,9 @@ class _PedidosPageState extends State<PedidosPage> {
     return 'Data inválida: $iso';
   }
 
-  List<Map<String, String>> parseProdutos(String produtosRaw) {
+  List<Map<String, String>> parseProdutos(String? produtosRaw) {
     final List<Map<String, String>> produtos = [];
+    if (produtosRaw == null || produtosRaw.isEmpty) return produtos;
     final List<String> items = produtosRaw.split('*\n').where((item) => item.trim().isNotEmpty).toList();
 
     for (String item in items) {
@@ -697,8 +609,7 @@ class _PedidosPageState extends State<PedidosPage> {
             child: _isInitialLoading
                 ? const SizedBox.shrink()
                 : _filteredPedidos.isEmpty
-                    ? const Center(
-                        child: Text('Nenhum pedido encontrado.', style: TextStyle(color: Colors.grey, fontSize: 16)))
+                    ? const Center(child: Text('Nenhum pedido encontrado.', style: TextStyle(color: Colors.grey, fontSize: 16)))
                     : ListView.builder(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         itemCount: _filteredPedidos.length,
@@ -711,7 +622,7 @@ class _PedidosPageState extends State<PedidosPage> {
                             formatDataAgendamento: _formatoDataAgendamento,
                             onStatusChanged: (newStatus) async {
                               try {
-                                await _gasApi.updateStatus(pedido.id, newStatus);
+                                await GasApi.updateStatus(pedido.id ?? '', newStatus);
                                 setState(() {
                                   final idx = _allPedidos.indexWhere((p) => p.id == pedido.id);
                                   if (idx != -1) {
@@ -738,9 +649,7 @@ class _PedidosPageState extends State<PedidosPage> {
   }
 }
 
-// === RESTANTE DO ARQUIVO (FilterPanel, _DateField, PedidoCard, extension) ===
-// (Mantido exatamente igual ao original, sem alterações)
-
+// === RESTANTE DO ARQUIVO ===
 class FilterPanel extends StatelessWidget {
   final String searchText;
   final TextEditingController searchController;
@@ -930,8 +839,8 @@ class _DateField extends StatelessWidget {
 class PedidoCard extends StatelessWidget {
   final Pedido pedido;
   final List<String> orderStatusOptions;
-  final String Function(String) formatHorario;
-  final String Function(String) formatDataAgendamento;
+  final String Function(String?) formatHorario;
+  final String Function(String?) formatDataAgendamento;
   final Function(String) onStatusChanged;
   final VoidCallback onTap;
 
@@ -951,7 +860,7 @@ class PedidoCard extends StatelessWidget {
 
     Color statusBackground;
     Color statusText;
-    switch (pedido.status.toLowerCase()) {
+    switch ((pedido.status ?? '').toLowerCase()) {
       case 'registrado':
         statusBackground = const Color(0xFFE0F2FE);
         statusText = const Color(0xFF0369A1);
@@ -980,7 +889,7 @@ class PedidoCard extends StatelessWidget {
     Color deliveryBackground;
     Color deliveryText;
     IconData deliveryIcon;
-    switch (pedido.tipoEntrega.toLowerCase()) {
+    switch ((pedido.tipoEntrega ?? '').toLowerCase()) {
       case 'delivery':
         deliveryBackground = const Color(0xFFDCFCE7);
         deliveryText = const Color(0xFF166534);
@@ -997,9 +906,8 @@ class PedidoCard extends StatelessWidget {
         deliveryIcon = Icons.help_outline_rounded;
     }
 
-    final agendamentoDate = formatDataAgendamento(pedido.dataAgendamento.isNotEmpty ? pedido.dataAgendamento : pedido.data);
-    final agendamentoHorario = pedido.horarioAgendamento.isNotEmpty ? pedido.horarioAgendamento : '';
-    final isDateInvalid = agendamentoDate.startsWith('Data inválida');
+    final agendamentoDate = formatDataAgendamento(pedido.dataAgendamento?.isNotEmpty == true ? pedido.dataAgendamento : pedido.data);
+    final agendamentoHorario = pedido.horarioAgendamento ?? ''; // <-- Garantido como String
 
     return InkWell(
       onTap: onTap,
@@ -1012,7 +920,7 @@ class PedidoCard extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: isDateInvalid ? Colors.redAccent.withOpacity(0.5) : Colors.black12.withOpacity(0.06),
+            color: agendamentoDate.startsWith('Data inválida') ? Colors.redAccent.withOpacity(0.5) : Colors.black12.withOpacity(0.06),
           ),
           boxShadow: [
             BoxShadow(
@@ -1043,7 +951,7 @@ class PedidoCard extends StatelessWidget {
                         '#${pedido.id}',
                         style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
                       ),
-                      if (isDateInvalid) ...[
+                      if (agendamentoDate.startsWith('Data inválida')) ...[
                         const SizedBox(width: 8),
                         const Icon(Icons.warning_rounded, color: Colors.white, size: 16),
                       ],
@@ -1078,9 +986,9 @@ class PedidoCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            Text(pedido.nome, style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
+            Text(pedido.nome ?? 'Sem nome', style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
             const SizedBox(height: 2),
-            Text(pedido.bairro, style: TextStyle(fontSize: 13.5, color: Colors.grey[700])),
+            Text(pedido.bairro ?? 'Sem bairro', style: TextStyle(fontSize: 13.5, color: Colors.grey[700])),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -1093,7 +1001,7 @@ class PedidoCard extends StatelessWidget {
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
-                      value: pedido.status,
+                      value: pedido.status ?? 'Registrado',
                       isDense: true,
                       icon: Icon(Icons.arrow_drop_down_rounded, size: 20, color: statusText),
                       dropdownColor: statusBackground,
@@ -1116,16 +1024,16 @@ class PedidoCard extends StatelessWidget {
                 Row(
                   children: [
                     Icon(
-                      isDateInvalid ? Icons.warning_rounded : Icons.calendar_today_rounded,
+                      agendamentoDate.startsWith('Data inválida') ? Icons.warning_rounded : Icons.calendar_today_rounded,
                       size: 16,
-                      color: isDateInvalid ? Colors.redAccent : Colors.grey[700],
+                      color: agendamentoDate.startsWith('Data inválida') ? Colors.redAccent : Colors.grey[700],
                     ),
                     const SizedBox(width: 6),
                     Text(
                       agendamentoDate,
                       style: TextStyle(
                         fontSize: 12.5,
-                        color: isDateInvalid ? Colors.redAccent : Colors.grey[800],
+                        color: agendamentoDate.startsWith('Data inválida') ? Colors.redAccent : Colors.grey[800],
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -1133,7 +1041,7 @@ class PedidoCard extends StatelessWidget {
                     Icon(Icons.access_time_filled_rounded, size: 16, color: Colors.grey[700]),
                     const SizedBox(width: 6),
                     Text(
-                      agendamentoHorario,
+                      agendamentoHorario, // <-- Agora sempre String
                       style: TextStyle(fontSize: 12.5, color: Colors.grey[800], fontWeight: FontWeight.w600),
                     ),
                   ],

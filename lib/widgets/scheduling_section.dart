@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
-import '../../globals.dart'; // currentUser
+import '../../globals.dart'; // ← currentUserGlobal
 
 class SchedulingSection extends StatefulWidget {
   final String shippingMethod;
@@ -38,7 +38,7 @@ class _SchedulingSectionState extends State<SchedulingSection> {
   Future<void> _log(String message) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final unidade = (currentUser?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase();
+      final unidade = (currentUserGlobal?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase(); // CORRIGIDO
       final appDir = Directory('${dir.path}/ERPUnificado/$unidade');
       if (!appDir.existsSync()) appDir.createSync(recursive: true);
 
@@ -190,7 +190,7 @@ class _SchedulingSectionState extends State<SchedulingSection> {
 
   @override
   Widget build(BuildContext context) {
-    final unidade = currentUser?.unidade ?? 'CD';
+    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
