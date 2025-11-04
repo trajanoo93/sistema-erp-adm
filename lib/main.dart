@@ -1,6 +1,7 @@
 // lib/main.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -54,6 +55,17 @@ class MyApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.white,
         textTheme: GoogleFonts.poppinsTextTheme(),
       ),
+      // ADICIONADO: Suporte a localizações
+      localizationsDelegates: const [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const [
+        Locale('pt', 'BR'),
+        Locale('en', 'US'),
+      ],
+      locale: const Locale('pt', 'BR'),
       home: Consumer<AuthProvider>(  // ← FUNCIONA
         builder: (context, auth, _) {
           return auth.isAuthenticated ? const HomePage() : const AuthPage();

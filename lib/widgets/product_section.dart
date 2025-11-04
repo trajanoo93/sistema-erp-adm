@@ -54,7 +54,7 @@ class _ProductSectionState extends State<ProductSection> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Text(
-            'Produtos - $unidade',
+            'Produtos',
             style: GoogleFonts.poppins(
               fontSize: 18,
               fontWeight: FontWeight.w600,

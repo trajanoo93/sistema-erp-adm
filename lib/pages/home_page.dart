@@ -8,10 +8,15 @@ import 'dashboard_page.dart';
 import 'pedidos_page.dart';
 import 'criar_pedido_page.dart';
 import 'auth_page.dart';
+import 'conferir_pagamentos_page.dart';
+import 'criar_link_page.dart';
+import 'motoboys_page.dart';     
+import 'atualizacoes_page.dart';    
 
 class HomePage extends StatefulWidget {
   const HomePage({Key? key}) : super(key: key);
-  @override State<HomePage> createState() => _HomePageState();
+  @override
+  State<HomePage> createState() => _HomePageState();
 }
 
 class _HomePageState extends State<HomePage> {
@@ -23,10 +28,22 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildMainContent() {
     switch (_selectedMenu) {
-      case MenuItem.dashboard: return const DashboardPage();
-      case MenuItem.pedidos: return const PedidosPage();
-      case MenuItem.novoPedido: return const CriarPedidoPage();
-      default: return const DashboardPage();
+      case MenuItem.dashboard:
+        return const DashboardPage();
+      case MenuItem.pedidos:
+        return const PedidosPage();
+      case MenuItem.novoPedido:
+        return const CriarPedidoPage();
+      case MenuItem.criarLink:
+        return const CriarLinkPage();
+      case MenuItem.verPagamentos:
+        return const ConferirPagamentosPage();
+      case MenuItem.motoboys:  // ADICIONADO
+        return const MotoboysPage();
+      case MenuItem.atualizacoes:  // ADICIONADO
+        return const AtualizacoesPage();
+      default:
+        return const DashboardPage();
     }
   }
 
@@ -39,7 +56,7 @@ class _HomePageState extends State<HomePage> {
       backgroundColor: const Color(0xFFF8F9FA),
       body: Row(
         children: [
-          // SIDEBAR
+          // === SIDEBAR ===
           SidebarMenu(
             selectedMenu: _selectedMenu,
             onMenuItemSelected: _onMenuItemSelected,
@@ -54,7 +71,7 @@ class _HomePageState extends State<HomePage> {
             },
           ),
 
-          // CONTEÚDO PRINCIPAL
+          // === CONTEÚDO PRINCIPAL ===
           Expanded(child: _buildMainContent()),
         ],
       ),

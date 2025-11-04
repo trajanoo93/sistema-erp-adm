@@ -4,9 +4,10 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:mask_text_input_formatter/mask_text_input_formatter.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:async'; // Adicionado para suportar Timer
+import 'dart:async'; 
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
+import '../globals.dart';
 
 class CriarLinkPage extends StatefulWidget {
   const CriarLinkPage({Key? key}) : super(key: key);
@@ -35,15 +36,27 @@ class _CriarLinkPageState extends State<CriarLinkPage> {
     filter: {"#": RegExp(r'[0-9]')},
   );
 
-  Future<void> logToFile(String message) async {
-    try {
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/sistema-erp-barreiro/app_logs.txt');
-      await file.writeAsString('[${DateTime.now()}] $message\n', mode: FileMode.append);
-    } catch (e) {
-      debugPrint('Falha ao escrever log: $e');
-    }
+  late String _unidade;
+
+  @override
+  void initState() {
+    super.initState();
+    _unidade = currentUser?.unidade ?? 'Barreiro';  
   }
+
+  Future<void> logToFile(String message) async {
+  try {
+    final directory = await getApplicationDocumentsDirectory();
+    final appDir = Directory('${directory.path}/sistema-erp-cd');
+    if (!await appDir.exists()) {
+      await appDir.create(recursive: true);
+    }
+    final file = File('${appDir.path}/app_logs.txt');
+    await file.writeAsString('[${DateTime.now()}] $message\n', mode: FileMode.append);
+  } catch (e) {
+    debugPrint('Falha ao escrever log: $e');
+  }
+}
 
   Future<void> _fetchOrder() async {
     final orderId = _orderIdController.text.trim();
@@ -152,29 +165,30 @@ class _CriarLinkPageState extends State<CriarLinkPage> {
   }
 
   Future<Map<String, String>?> _generatePaymentLinkInternal({
-    required String customerName,
-    required String phoneNumber,
-    required double amount,
-    required String paymentMethod,
-    required String orderId,
-  }) async {
-    final rawPhone = phoneNumber.replaceAll(RegExp(r'\D'), '');
-    if (rawPhone.length < 10 || rawPhone.length > 11) {
-      throw Exception('Número de telefone inválido: deve ter 10 ou 11 dígitos.');
-    }
-    final areaCode = rawPhone.length >= 2 ? rawPhone.substring(0, 2) : '31';
-    final phone = rawPhone.length >= 9 ? rawPhone.substring(2) : rawPhone;
-    final amountInCents = (amount * 100).toInt();
+  required String customerName,
+  required String phoneNumber,
+  required double amount,
+  required String paymentMethod,
+  required String orderId,
+}) async {
+  final rawPhone = phoneNumber.replaceAll(RegExp(r'\D'), '');
+  if (rawPhone.length < 10 || rawPhone.length > 11) {
+    throw Exception('Número de telefone inválido: deve ter 10 ou 11 dígitos.');
+  }
+  final areaCode = rawPhone.length >= 2 ? rawPhone.substring(0, 2) : '31';
+  final phone = rawPhone.length >= 9 ? rawPhone.substring(2) : rawPhone;
+  final amountInCents = (amount * 100).toInt();
 
-    if (amountInCents <= 0) {
-      throw Exception('O valor total do pedido deve ser maior que zero.');
-    }
+  if (amountInCents <= 0) {
+    throw Exception('O valor total do pedido deve ser maior que zero.');
+  }
 
-    const storeUnit = 'Unidade Barreiro';
-    const proxyUnit = 'Unidade%20Barreiro';
-    final endpoint = 'https://aogosto.com.br/proxy/$proxyUnit/${paymentMethod == 'pix' ? 'pagarme.php' : 'stripe.php'}';
 
-    await logToFile('Gerando link de pagamento: paymentMethod=$paymentMethod, storeUnit=$storeUnit, endpoint=$endpoint, amountInCents=$amountInCents');
+  final storeUnit = 'Unidade $_unidade';
+  final proxyUnit = 'Unidade%20$_unidade';
+  final endpoint = 'https://aogosto.com.br/proxy/$proxyUnit/${paymentMethod == 'pix' ? 'pagarme.php' : 'stripe.php'}';
+
+  await logToFile('Gerando link de pagamento: paymentMethod=$paymentMethod, storeUnit=$storeUnit, endpoint=$endpoint, amountInCents=$amountInCents');
 
     try {
       if (paymentMethod == 'pix') {
@@ -353,7 +367,7 @@ class _CriarLinkPageState extends State<CriarLinkPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Busque o pedido para criar um link de pagamento para a Unidade Barreiro:',
+              'Busque o pedido para criar um link de pagamento para a Unidade $_unidade:',
               style: GoogleFonts.poppins(
                 fontSize: 14,
                 color: Colors.grey.shade600,

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
-import '../../globals.dart'; // ← currentUserGlobal
+import '../../globals.dart';
 import '../models/pedido_state.dart';
 
 class SummarySection extends StatelessWidget {
@@ -34,14 +34,12 @@ class SummarySection extends StatelessWidget {
     this.resultMessage,
   }) : super(key: key);
 
-  /// Log por unidade
   Future<void> _log(String message) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final unidade = (currentUser?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase(); // CORRIGIDO
+      final unidade = (currentUser?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase();
       final appDir = Directory('${dir.path}/ERPUnificado/$unidade');
       if (!appDir.existsSync()) appDir.createSync(recursive: true);
-
       final file = File('${appDir.path}/app_logs.txt');
       await file.writeAsString('[${DateTime.now()}] [Resumo] $message\n', mode: FileMode.append);
     } catch (e) {
@@ -68,7 +66,7 @@ class SummarySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final primaryColor = const Color(0xFFF28C38);
     final successColor = Colors.green.shade600;
-    final unidade = currentUser?.unidade ?? 'CD'; // CORRIGIDO
+    final unidade = currentUser?.unidade ?? 'CD';
 
     String? paymentText;
     bool isPix = false;
@@ -83,6 +81,11 @@ class SummarySection extends StatelessWidget {
         isPix = !paymentInstructions!.contains('stripe');
         _log('Erro ao parsear paymentInstructions: $e');
       }
+    }
+
+    // AUTO-SELEÇÃO: Se não houver método selecionado, pega o primeiro
+    if (pedido.selectedPaymentMethod.isEmpty && pedido.availablePaymentMethods.isNotEmpty) {
+      pedido.selectedPaymentMethod = pedido.availablePaymentMethods.first['title'] ?? '';
     }
 
     return AnimatedContainer(
@@ -106,7 +109,6 @@ class SummarySection extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
-          // Loja Selecionada
           _buildRow(
             icon: Icons.location_on,
             label: 'Loja Selecionada',
@@ -115,11 +117,9 @@ class SummarySection extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          // Total Produtos
           _buildRow(label: 'Total dos Produtos', value: 'R\$ ${totalOriginal.toStringAsFixed(2)}'),
           _buildRow(label: 'Custo de Envio', value: 'R\$ ${pedido.shippingCost.toStringAsFixed(2)}'),
 
-          // Desconto
           if (isCouponValid) ...[
             const SizedBox(height: 8),
             _buildRow(
@@ -131,7 +131,6 @@ class SummarySection extends StatelessWidget {
           ],
           const SizedBox(height: 8),
 
-          // Total Final
           _buildRow(
             label: 'Total com Desconto',
             value: 'R\$ ${totalWithDiscount.toStringAsFixed(2)}',
@@ -139,15 +138,17 @@ class SummarySection extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // Método de Pagamento
+          // MÉTODO DE PAGAMENTO COM AUTO-SELEÇÃO
           DropdownButtonFormField<String>(
-            value: pedido.availablePaymentMethods.any((m) => m['title'] == pedido.selectedPaymentMethod)
-                ? pedido.selectedPaymentMethod
+            value: pedido.availablePaymentMethods.isNotEmpty
+                ? pedido.selectedPaymentMethod.isNotEmpty
+                    ? pedido.selectedPaymentMethod
+                    : pedido.availablePaymentMethods.first['title']
                 : null,
             decoration: _inputDecoration('Método de Pagamento', Icons.payment),
             items: pedido.availablePaymentMethods
                 .map((m) => DropdownMenuItem(
-                      value: m['title'] ?? '', // CORRIGIDO: String? → String
+                      value: m['title'] ?? '',
                       child: Text(m['title'] ?? ''),
                     ))
                 .toList(),
@@ -163,16 +164,10 @@ class SummarySection extends StatelessWidget {
           ),
           const SizedBox(height: 16),
 
-          // Botão Criar Pedido
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: isLoading || pedido.selectedPaymentMethod.isEmpty ? null : () async {
-                await onCreateOrder();
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Criando pedido na $unidade...'), backgroundColor: primaryColor),
-                );
-              },
+              onPressed: isLoading || pedido.selectedPaymentMethod.isEmpty ? null : onCreateOrder,
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryColor,
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -185,7 +180,6 @@ class SummarySection extends StatelessWidget {
             ),
           ),
 
-          // Resultado
           if (resultMessage != null) ...[
             const SizedBox(height: 16),
             AnimatedOpacity(
@@ -219,7 +213,6 @@ class SummarySection extends StatelessWidget {
             ),
           ],
 
-          // Instruções de Pagamento
           if (paymentInstructions != null && paymentText != null && paymentText!.isNotEmpty) ...[
             const SizedBox(height: 16),
             AnimatedOpacity(

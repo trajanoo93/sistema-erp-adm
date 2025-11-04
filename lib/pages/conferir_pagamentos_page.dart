@@ -1,3 +1,4 @@
+// lib/pages/conferir_pagamentos_page.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
@@ -6,12 +7,11 @@ import 'dart:async';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:intl/intl.dart';
+import '../globals.dart';  // ← IMPORTA currentUser
 
 class ConferirPagamentosPage extends StatefulWidget {
   const ConferirPagamentosPage({Key? key}) : super(key: key);
-
-  @override
-  State<ConferirPagamentosPage> createState() => _ConferirPagamentosPageState();
+  @override State<ConferirPagamentosPage> createState() => _ConferirPagamentosPageState();
 }
 
 class _ConferirPagamentosPageState extends State<ConferirPagamentosPage> {
@@ -25,21 +25,29 @@ class _ConferirPagamentosPageState extends State<ConferirPagamentosPage> {
   final TextEditingController _nameFilterController = TextEditingController();
   Timer? _debounce;
 
+  late String _unidade;  // ← DINÂMICO
+
   @override
   void initState() {
+
     super.initState();
+    _unidade = currentUser?.unidade ?? 'Barreiro';  // ← Pega do usuário
     _fetchPayments();
   }
 
   Future<void> logToFile(String message) async {
-    try {
-      final directory = await getApplicationDocumentsDirectory();
-      final file = File('${directory.path}/sistema-erp-barreiro/app_logs.txt');
-      await file.writeAsString('[${DateTime.now()}] $message\n', mode: FileMode.append);
-    } catch (e) {
-      debugPrint('Falha ao escrever log: $e');
+  try {
+    final directory = await getApplicationDocumentsDirectory();
+    final appDir = Directory('${directory.path}/sistema-erp-cd');
+    if (!await appDir.exists()) {
+      await appDir.create(recursive: true); 
     }
+    final file = File('${appDir.path}/app_logs.txt');
+    await file.writeAsString('[${DateTime.now()}] $message\n', mode: FileMode.append);
+  } catch (e) {
+    debugPrint('Falha ao escrever log: $e');
   }
+}
 
   Future<void> _fetchPayments({bool append = false}) async {
     if (_isLoading || !_hasMore) return;
@@ -52,8 +60,8 @@ class _ConferirPagamentosPageState extends State<ConferirPagamentosPage> {
       final endDate = DateFormat('yyyy-MM-dd').format(now);
 
       final url = _paymentMethod == 'pix'
-          ? 'https://aogosto.com.br/proxy/consulta-pagarme.php?page=$_currentPage&size=10&unidade=Unidade%20Barreiro&start_date=$startDate&end_date=$endDate'
-          : 'https://aogosto.com.br/proxy/consulta-stripe.php?unidade=Unidade%20Barreiro&start_date=$startDate&end_date=$endDate';
+    ? 'https://aogosto.com.br/proxy/consulta-pagarme.php?page=$_currentPage&size=10&unidade=Unidade%20$_unidade&start_date=$startDate&end_date=$endDate'
+    : 'https://aogosto.com.br/proxy/consulta-stripe.php?unidade=Unidade%20$_unidade&start_date=$startDate&end_date=$endDate';
 
       await logToFile('Requisição ao proxy de pagamentos: $url');
 
@@ -180,7 +188,7 @@ class _ConferirPagamentosPageState extends State<ConferirPagamentosPage> {
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        'Pagamentos da Unidade Barreiro',
+                        'Pagamentos da $_unidade',
                         style: GoogleFonts.poppins(
                           fontSize: 22,
                           fontWeight: FontWeight.w600,

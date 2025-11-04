@@ -9,7 +9,6 @@ import 'package:intl/intl.dart';
 import '../globals.dart';
 import '../models/pedido_state.dart';
 import '../services/criar_pedido_service.dart';
-import '../services/criar_pedido_gas.dart';
 import '../widgets/customer_section.dart';
 import '../widgets/product_section.dart';
 import '../widgets/address_section.dart';
@@ -72,6 +71,9 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
   // Configuração da unidade autenticada
   late final AppUser _userConfig;
 
+  // Service único (WooCommerce)
+  late final CriarPedidoService _service;
+
   static const List<String> _validPaymentMethods = [
     'Pix',
     'Cartão de Crédito On-line',
@@ -85,13 +87,13 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
     super.initState();
     final user = currentUser;
     if (user == null) {
-      // Redireciona para login se não autenticado
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.of(context).pushReplacementNamed('/login');
       });
       return;
     }
     _userConfig = user;
+    _service = CriarPedidoService(user: _userConfig);  // ← SERVICE CRIADO AQUI
     _initFuture = _initializePedido();
   }
 
@@ -181,8 +183,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
       }
       if (mounted) setState(() => _isLoading = true);
       try {
-        final service = CriarPedidoService();
-        final customer = await service.fetchCustomerByPhone(phone);
+        final customer = await _service.fetchCustomerByPhone(phone);  // ← SERVICE
         if (customer != null && mounted) {
           setState(() {
             _pedido.nameController.text = customer['first_name'] + ' ' + (customer['last_name'] ?? '');
@@ -383,14 +384,13 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
       final storeFinal = _pedido.shippingMethod == 'pickup' ? 'Unidade ${_userConfig.unidade}' : _pedido.storeFinal;
       final storeId = _pedido.shippingMethod == 'pickup' ? _getPickupStoreId(_userConfig.unidade) : _pedido.pickupStoreId;
 
-      final service = CriarPedidoService();
       final methodSlug = _paymentSlugFromLabel(_pedido.selectedPaymentMethod);
 
-      final order = await service.createOrder(
+      final order = await _service.createOrder(  // ← SERVICE
         customerName: _pedido.nameController.text,
         customerEmail: _pedido.emailController.text,
         customerPhone: phone,
-        billingCompany: '',
+        billingCompany: _userConfig.id.toString(),
         products: _pedido.products,
         shippingMethod: _pedido.shippingMethod,
         storeFinal: storeFinal,
@@ -739,7 +739,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
                               final selectedProduct = await showDialog<Map<String, dynamic>>(
                                 context: context,
                                 builder: (context) => ProductSelectionDialog(
-                                  gasService: CriarPedidoGas(user: _userConfig),
+                                  service: _service,  // ← SERVICE PASSADO AQUI
                                 ),
                               );
                               if (selectedProduct != null && mounted) {

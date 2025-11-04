@@ -4,14 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../globals.dart';
-import '../services/criar_pedido_gas.dart';
+import '../services/criar_pedido_service.dart';  // ← WooCommerce
 
 class ProductSelectionDialog extends StatefulWidget {
-  final CriarPedidoGas gasService;
+  final CriarPedidoService service;  // ← Agora usa o service do WooCommerce
 
   const ProductSelectionDialog({
     Key? key,
-    required this.gasService,
+    required this.service,
   }) : super(key: key);
 
   @override
@@ -23,12 +23,10 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
   List<Map<String, dynamic>> _products = [];
   bool _isLoading = false;
   final primaryColor = const Color(0xFFF28C38);
-  late final CriarPedidoGas _gasService;
 
   @override
   void initState() {
     super.initState();
-    _gasService = widget.gasService;
     _searchController.addListener(_onSearchChanged);
   }
 
@@ -62,7 +60,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
   Future<void> _fetchProducts(String query) async {
     setState(() => _isLoading = true);
     try {
-      final products = await _gasService.fetchProducts(query);
+      final products = await widget.service.fetchProducts(query);  // ← WooCommerce
       setState(() => _products = products);
       await _log('Busca: "$query" → ${products.length} produtos encontrados');
     } catch (e) {
@@ -79,8 +77,8 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
 
   Future<Map<String, dynamic>?> _showVariationDialog(Map<String, dynamic> product) async {
     try {
-      final attributes = await _gasService.fetchProductAttributes(product['id'].toString());
-      final variations = await _gasService.fetchProductVariations(product['id'].toString());
+      final attributes = await widget.service.fetchProductAttributes(product['id']);
+      final variations = await widget.service.fetchProductVariations(product['id']);
 
       final Map<String, String> selectedAttributes = {};
       for (var attr in attributes) {
@@ -122,7 +120,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
                           padding: const EdgeInsets.symmetric(vertical: 8.0),
                           child: DropdownButtonFormField<String>(
                             value: selectedAttributes[attr['name']],
-                            decoration: _inputDecoration(attr['name'] ?? '', Icons.label), // CORRIGIDO: 2 argumentos
+                            decoration: _inputDecoration(attr['name'] ?? '', Icons.label),
                             items: options.map((opt) {
                               return DropdownMenuItem(
                                 value: opt.toString(),
@@ -257,7 +255,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
           children: [
             TextField(
               controller: _searchController,
-              decoration: _inputDecoration('Buscar Produto (mín. 3 caracteres)', Icons.search), // CORRIGIDO
+              decoration: _inputDecoration('Buscar Produto (mín. 3 caracteres)', Icons.search),
             ),
             const SizedBox(height: 16),
             if (_isLoading)
@@ -321,7 +319,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
     );
   }
 
-  InputDecoration _inputDecoration(String label, IconData icon) { // CORRIGIDO: 2 parâmetros
+  InputDecoration _inputDecoration(String label, IconData icon) {
     return InputDecoration(
       labelText: label,
       labelStyle: GoogleFonts.poppins(color: Colors.grey.shade600),

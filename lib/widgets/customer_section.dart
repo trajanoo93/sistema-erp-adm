@@ -58,7 +58,7 @@ class CustomerSection extends StatelessWidget {
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           leading: Icon(Icons.person_outline, color: primaryColor),
           title: Text(
-            'Dados do Cliente - $unidade',
+            'Dados do Cliente',
             style: GoogleFonts.poppins(
               fontSize: 18,
               fontWeight: FontWeight.w600,
