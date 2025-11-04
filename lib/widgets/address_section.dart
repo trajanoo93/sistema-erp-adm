@@ -110,8 +110,8 @@ class _AddressSectionState extends State<AddressSection> {
 
   void _updatePickupInfo() {
     if (!mounted) return;
-    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
-    final storeId = currentUserGlobal?.storeId ?? ''; // CORRIGIDO
+    final unidade = currentUser?.unidade ?? 'CD'; // CORRIGIDO
+    final storeId = currentUser?.storeId ?? ''; // CORRIGIDO
     setState(() {
       _storeIndication = 'Retirada na loja: $unidade';
     });
@@ -160,7 +160,7 @@ class _AddressSectionState extends State<AddressSection> {
         }
 
         // Atualiza indicação de loja
-        final storeFinal = widget.pedido?.storeFinal ?? currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
+        final storeFinal = widget.pedido?.storeFinal ?? currentUser?.unidade ?? 'CD'; // CORRIGIDO
         if (mounted) {
           setState(() {
             _storeIndication = widget.shippingMethod == 'delivery' && storeFinal.isNotEmpty
@@ -196,8 +196,8 @@ class _AddressSectionState extends State<AddressSection> {
     widget.onStoreUpdated('', '');
 
     if (widget.pedido != null) {
-      final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
-      final storeId = currentUserGlobal?.storeId ?? ''; // CORRIGIDO
+      final unidade = currentUser?.unidade ?? 'CD'; // CORRIGIDO
+      final storeId = currentUser?.storeId ?? ''; // CORRIGIDO
 
       widget.pedido!.cepController.clear();
       widget.pedido!.addressController.clear();

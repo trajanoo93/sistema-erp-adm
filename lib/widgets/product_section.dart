@@ -33,7 +33,7 @@ class _ProductSectionState extends State<ProductSection> {
   Future<void> _log(String message) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final unidade = (currentUserGlobal?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase(); // CORRIGIDO
+      final unidade = (currentUser?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase(); // CORRIGIDO
       final appDir = Directory('${dir.path}/ERPUnificado/$unidade');
       if (!appDir.existsSync()) appDir.createSync(recursive: true);
 
@@ -46,7 +46,7 @@ class _ProductSectionState extends State<ProductSection> {
 
   @override
   Widget build(BuildContext context) {
-    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
+    final unidade = currentUser?.unidade ?? 'CD'; // CORRIGIDO
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

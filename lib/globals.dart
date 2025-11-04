@@ -1,6 +1,4 @@
 // lib/globals.dart
-
-/// Modelo de usuário autenticado
 class AppUser {
   final int id;
   final String nome;
@@ -10,13 +8,10 @@ class AppUser {
   final String unmarkPrintedAction;
   final String updateStatusAction;
   final String baseScriptUrl;
+  final String storeId;
+  final String whatsappNumber;  
 
-  /// StoreId dinâmico: "sion", "lagoa_santa", "barreiro"
-  String get storeId {
-    return unidade.toLowerCase().replaceAll(' ', '_');
-  }
-
-  const AppUser({
+  AppUser({
     required this.id,
     required this.nome,
     required this.unidade,
@@ -25,50 +20,60 @@ class AppUser {
     required this.unmarkPrintedAction,
     required this.updateStatusAction,
     required this.baseScriptUrl,
+    required this.storeId,
+    required this.whatsappNumber,  
   });
+
+  @override
+  String toString() => 'AppUser($nome, $unidade)';
 }
 
-/// === DADOS DOS USUÁRIOS (com storeId dinâmico) ===
+/// === MAPEAMENTO DE UNIDADES ===
+final Map<String, String> _storeIds = {
+  'Barreiro': '110727',
+  'Sion': '127163',
+  'Lagoa Santa': '131813',
+};
+
+/// === USUÁRIOS AUTENTICADOS ===
 final Map<int, AppUser> appUsers = {
+  4: AppUser(
+    id: 4,
+    nome: 'Paulo',
+    unidade: 'Barreiro',
+    readAction: 'ReadCD',
+    markPrintedAction: 'MarkPrinted',
+    unmarkPrintedAction: 'UnmarkPrinted',
+    updateStatusAction: 'UpdateStatusPedidoCD',
+    baseScriptUrl: 'https://script.google.com/macros/s/AKfycbzukU2hVxn6tRA_OZH-wXWx4wqTSWa7TeMcMPX7UGr1t6oedrmJzNBo6Qx3tak6Qbw5/exec',
+    storeId: _storeIds['Barreiro']!,
+    whatsappNumber: '5531995348704',  
+  ),
   110: AppUser(
     id: 110,
     nome: 'Mylene',
     unidade: 'Sion',
-    readAction: 'ReadCDSion',
-    markPrintedAction: 'MarkPrintedSion',
-    unmarkPrintedAction: 'UnmarkPrintedSion',
-    updateStatusAction: 'UpdateStatusPedidoSion',
-    baseScriptUrl: 'https://script.google.com/macros/s/AKfycbz4J0iFumPBam_dSDAra31NHMJ29ze-Ykf64JkjqLTqRukR7j0MF5_tZe2Q-_BZgijW/exec',
+    readAction: 'ReadCD',
+    markPrintedAction: 'MarkPrinted',
+    unmarkPrintedAction: 'UnmarkPrinted',
+    updateStatusAction: 'UpdateStatusPedidoCD',  
+    baseScriptUrl: 'https://script.google.com/macros/s/AKfycbzukU2hVxn6tRA_OZH-wXWx4wqTSWa7TeMcMPX7UGr1t6oedrmJzNBo6Qx3tak6Qbw5/exec',
+    storeId: _storeIds['Sion']!,
+    whatsappNumber: '5531995348705', 
   ),
   83: AppUser(
     id: 83,
     nome: 'Lincoln',
     unidade: 'Lagoa Santa',
-    readAction: 'ReadCDLagoaSanta',
-    markPrintedAction: 'MarkPrintedLagoaSanta',
-    unmarkPrintedAction: 'UnmarkPrintedLagoaSanta',
-    updateStatusAction: 'UpdateStatusPedidoLagoaSanta',
-    baseScriptUrl: 'https://script.google.com/macros/s/AKfycbz4J0iFumPBam_dSDAra31NHMJ29ze-Ykf64JkjqLTqRukR7j0MF5_tZe2Q-_BZgijW/exec',
-  ),
-  4: AppUser(
-    id: 4,
-    nome: 'Paulo',
-    unidade: 'Barreiro',
-    readAction: 'ReadCDBarreiro',
-    markPrintedAction: 'MarkPrintedBarreiro',
-    unmarkPrintedAction: 'UnmarkPrintedBarreiro',
-    updateStatusAction: 'UpdateStatusPedidoBarreiro',
-    baseScriptUrl: 'https://script.google.com/macros/s/AKfycbz4J0iFumPBam_dSDAra31NHMJ29ze-Ykf64JkjqLTqRukR7j0MF5_tZe2Q-_BZgijW/exec',
+    readAction: 'ReadCD',
+    markPrintedAction: 'MarkPrinted',
+    unmarkPrintedAction: 'UnmarkPrinted',
+    updateStatusAction: 'UpdateStatusPedidoCD', 
+    baseScriptUrl: 'https://script.google.com/macros/s/AKfycbzukU2hVxn6tRA_OZH-wXWx4wqTSWa7TeMcMPX7UGr1t6oedrmJzNBo6Qx3tak6Qbw5/exec',
+    storeId: _storeIds['Lagoa Santa']!,
+    whatsappNumber: '5531995348705',  
   ),
 };
 
-/// URL base comum (padrão)
-const String defaultBaseScriptUrl = 'https://script.google.com/macros/s/AKfycbz4J0iFumPBam_dSDAra31NHMJ29ze-Ykf64JkjqLTqRukR7j0MF5_tZe2Q-_BZgijW/exec';
-
-/// === VARIÁVEL GLOBAL DO USUÁRIO ATUAL ===
-AppUser? currentUserGlobal;
-
-/// === FUNÇÕES GLOBAIS DE ACESSO RÁPIDO ===
-String getCurrentStoreId() => currentUserGlobal?.storeId ?? '';
-String getCurrentUnidade() => currentUserGlobal?.unidade ?? '';
-bool isLoggedIn() => currentUserGlobal != null;
+/// === USUÁRIO ATUAL (GLOBAL) ===
+AppUser? currentUser;

@@ -34,7 +34,7 @@ class CustomerSection extends StatelessWidget {
   Future<void> logToFile(String message) async {
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final unidade = currentUserGlobal?.unidade ?? 'Desconhecida'; // CORRIGIDO
+      final unidade = currentUser?.unidade ?? 'Desconhecida'; // CORRIGIDO
       final sanitizedUnidade = unidade.replaceAll(' ', '_').toLowerCase();
       final appDir = Directory('${directory.path}/ERPUnificado/$sanitizedUnidade');
       if (!appDir.existsSync()) appDir.createSync(recursive: true);
@@ -49,7 +49,7 @@ class CustomerSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primaryColor = const Color(0xFFF28C38);
-    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
+    final unidade = currentUser?.unidade ?? 'CD';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

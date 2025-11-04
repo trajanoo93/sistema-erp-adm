@@ -38,7 +38,7 @@ class SummarySection extends StatelessWidget {
   Future<void> _log(String message) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final unidade = (currentUserGlobal?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase(); // CORRIGIDO
+      final unidade = (currentUser?.unidade ?? 'Desconhecida').replaceAll(' ', '_').toLowerCase(); // CORRIGIDO
       final appDir = Directory('${dir.path}/ERPUnificado/$unidade');
       if (!appDir.existsSync()) appDir.createSync(recursive: true);
 
@@ -68,7 +68,7 @@ class SummarySection extends StatelessWidget {
   Widget build(BuildContext context) {
     final primaryColor = const Color(0xFFF28C38);
     final successColor = Colors.green.shade600;
-    final unidade = currentUserGlobal?.unidade ?? 'CD'; // CORRIGIDO
+    final unidade = currentUser?.unidade ?? 'CD'; // CORRIGIDO
 
     String? paymentText;
     bool isPix = false;

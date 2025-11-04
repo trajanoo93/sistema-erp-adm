@@ -83,7 +83,7 @@ class _CriarPedidoPageState extends State<CriarPedidoPage> {
   @override
   void initState() {
     super.initState();
-    final user = currentUserGlobal;
+    final user = currentUser;
     if (user == null) {
       // Redireciona para login se não autenticado
       WidgetsBinding.instance.addPostFrameCallback((_) {

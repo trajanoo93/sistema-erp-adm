@@ -35,7 +35,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
   Future<void> _log(String message) async {
     try {
       final dir = await getApplicationDocumentsDirectory();
-      final unidade = (currentUserGlobal?.unidade ?? 'Desconhecida')
+      final unidade = (currentUser?.unidade ?? 'Desconhecida')
           .replaceAll(' ', '_')
           .toLowerCase();
       final appDir = Directory('${dir.path}/ERPUnificado/$unidade');
@@ -109,7 +109,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
 
               return AlertDialog(
                 title: Text(
-                  'Variações - ${currentUserGlobal?.unidade ?? 'CD'}',
+                  'Variações - ${currentUser?.unidade ?? 'CD'}',
                   style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
                 content: SingleChildScrollView(
@@ -243,7 +243,7 @@ class _ProductSelectionDialogState extends State<ProductSelectionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final unidade = currentUserGlobal?.unidade ?? 'CD';
+    final unidade = currentUser?.unidade ?? 'CD';
 
     return AlertDialog(
       title: Text(

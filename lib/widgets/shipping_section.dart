@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:erp_painel/models/pedido_state.dart';
+import 'package:sistema_erp_cd/models/pedido_state.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:intl/intl.dart';
 import 'dart:io';
