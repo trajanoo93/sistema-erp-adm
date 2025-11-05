@@ -1,9 +1,7 @@
 name: sistema_erp_cd
-description: Software para gerenciamento de pedidos da Central de Distribuição - Ao Gosto Carnes - Unidade Barreiro
-
+description: ERP Unificado - Gerenciamento de pedidos para todas as unidades Ao Gosto Carnes
 publish_to: 'none'
-
-version: 1.4.3+143
+version: 1.5.0+150
 
 environment:
   sdk: ^3.6.1
@@ -11,19 +9,19 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_localizations: # necessário para DatePicker, traduções etc
+  flutter_localizations:
     sdk: flutter
 
-  provider: ^6.1.2                    # ADICIONADO: essencial para AuthProvider, ChangeNotifierProvider
+  provider: ^6.1.2
   google_fonts: ^6.2.1
-  http: ^1.2.2                        # atualizado (1.1.0 → 1.2.2) - mais estável
+  http: ^1.2.2
   intl: ^0.20.2
-  path_provider: ^2.1.5               # atualizado para versão mais recente
+  path_provider: ^2.1.5
   open_file: ^3.5.9
   flutter_launcher_icons: ^0.13.1
   cupertino_icons: ^1.0.8
   fl_chart: ^0.68.0
-  permission_handler: ^11.3.1         # atualizado
+  permission_handler: ^11.3.1
   printing: ^5.14.2
   pdf: ^3.11.1
   shared_preferences: ^2.5.2
@@ -44,6 +42,10 @@ flutter:
     - assets/icon/icon2.png
     - assets/icon/GO-logo.png
 
+
+windows:
+  executable: erp_unificado.exe
+
 flutter_launcher_icons:
   android:
     generate: true
@@ -53,6 +55,7 @@ flutter_launcher_icons:
     generate: true
   windows:
     generate: true
+    executable: erp_unificado.exe
   image_path: "assets/icon/GO-logo.png"
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/icon/icon2.png"
