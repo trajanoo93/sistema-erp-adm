@@ -121,41 +121,45 @@ class _PedidosPageState extends State<PedidosPage> {
   bool _isFetching = false;
   final Set<String> _printingNow = {};
 
-  @override
-  void initState() {
-    super.initState();
+ @override
+void initState() {
+  super.initState();
 
-    if (currentUser == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => AuthPage()),
-        );
-      });
-      return;
-    }
-
-    final now = DateTime.now();
-    _startDate = DateTime(now.year, now.month, now.day, 0, 0, 0);
-    _endDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
-    _startDateController.text = DateFormat('dd/MM/yyyy').format(_startDate!);
-    _endDateController.text = DateFormat('dd/MM/yyyy').format(_endDate!);
-    _searchController.text = _searchText;
-
-    _searchController.addListener(() {
-      if (_searchController.text != _searchText) {
-        setState(() => _searchText = _searchController.text);
-        _filterPedidos();
-      }
+  if (currentUser == null) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => AuthPage()),
+      );
     });
-
-    _loadPreviousPedidoIds().then((_) async {
-  await _loadPrintedPedidoIds(); 
-  await _fetchPedidosSilently();
-  if (mounted) setState(() => _isInitialLoading = false);
-});
-
-    _fetchTimer = Timer.periodic(const Duration(minutes: 1), (_) => _fetchPedidosSilently());
+    return;
   }
+
+  final now = DateTime.now();
+  _startDate = DateTime(now.year, now.month, now.day, 0, 0, 0);
+  _endDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
+  _startDateController.text = DateFormat('dd/MM/yyyy').format(_startDate!);
+  _endDateController.text = DateFormat('dd/MM/yyyy').format(_endDate!);
+  _searchController.text = _searchText;
+
+  _searchController.addListener(() {
+    if (_searchController.text != _searchText) {
+      setState(() => _searchText = _searchController.text);
+      _filterPedidos();
+    }
+  });
+
+  _loadPreviousPedidoIds().then((_) async {
+    await _loadPrintedPedidoIds();
+    await _fetchPedidosSilently();
+    if (mounted) {
+      setState(() => _isInitialLoading = false);
+      await _filterPedidos();  
+    }
+  });
+
+  _fetchTimer = Timer.periodic(const Duration(minutes: 1), (_) => _fetchPedidosSilently());
+}
+
 
   @override
   void dispose() {
