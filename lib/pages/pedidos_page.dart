@@ -148,14 +148,14 @@ void initState() {
     }
   });
 
-  _loadPreviousPedidoIds().then((_) async {
-    await _loadPrintedPedidoIds();
-    await _fetchPedidosSilently();
-    if (mounted) {
-      setState(() => _isInitialLoading = false);
-      await _filterPedidos();  
-    }
-  });
+ _loadPreviousPedidoIds().then((_) async {
+  await _loadPrintedPedidoIds();
+  await _fetchPedidosSilently();
+  if (mounted) {
+    setState(() => _isInitialLoading = false);
+    await _filterPedidos(); // ← FORÇA O FILTRO
+  }
+});
 
   _fetchTimer = Timer.periodic(const Duration(minutes: 1), (_) => _fetchPedidosSilently());
 }
@@ -324,45 +324,44 @@ void initState() {
             }
           });
 
-          // === IMPRESSÃO AUTOMÁTICA DE NOVOS PEDIDOS ===
-          // === IMPRESSÃO AUTOMÁTICA DE NOVOS PEDIDOS ===
-          final List<Pedido> novosPedidos = [];
-          final hoje = DateTime.now().toIso8601String().substring(0, 10); // 2025-11-06
+    // === IMPRESSÃO AUTOMÁTICA DE NOVOS PEDIDOS ===
+final List<Pedido> novosPedidos = [];
+final hoje = DateTime.now().toIso8601String().substring(0, 10);
 
-          for (final pedido in updatedPedidos) {
-            final id = _canonicalId(pedido.id);
-            final dataPedido = pedido.data?.substring(0, 10); // Formato: 2025-11-06
+for (final pedido in updatedPedidos) {
+  final id = _canonicalId(pedido.id);
+  final dataUsar = pedido.dataAgendamento?.isNotEmpty == true 
+      ? pedido.dataAgendamento 
+      : pedido.data;
+  final dataPedido = dataUsar?.substring(0, 10);
 
-            // SÓ IMPRIME SE:
-            // 1. Não foi impresso antes
-            // 2. É do dia de hoje
-            if (!_printedPedidoIds.contains(id) && dataPedido == hoje) {
-              novosPedidos.add(pedido);
-            }
-          }
+  if (!_printedPedidoIds.contains(id) && dataPedido == hoje) {
+    novosPedidos.add(pedido);
+  }
+}
 
-          if (novosPedidos.isNotEmpty) {
-            for (final pedido in novosPedidos) {
-              final id = _canonicalId(pedido.id);
-              final produtosParsed = parseProdutos(pedido.produtos ?? '');
+if (novosPedidos.isNotEmpty) {
+  for (final pedido in novosPedidos) {
+    final id = _canonicalId(pedido.id);
+    final produtosParsed = parseProdutos(pedido.produtos ?? '');
 
-              unawaited(
-                PedidoDetailDialog.printOrderAutomatically(
-                  context,
-                  pedido.toJson(),
-                  produtosParsed,
-                ).then((_) {
-                  _printedPedidoIds.add(id);
-                  _savePrintedPedidoIds();
-                }).catchError((e) {
-                  debugPrint('Erro ao imprimir pedido $id: $e');
-                }),
-              );
-            }
-          }
-          // === FIM DA IMPRESSÃO AUTOMÁTICA ===
+    unawaited(
+      PedidoDetailDialog.printOrderAutomatically(
+        context,
+        pedido.toJson(),
+        produtosParsed,
+      ).then((_) {
+        _printedPedidoIds.add(id);
+        _savePrintedPedidoIds();
+      }).catchError((e) {
+        debugPrint('Erro ao imprimir pedido $id: $e');
+      }),
+    );
+  }
+}
+// === FIM DA IMPRESSÃO AUTOMÁTICA ===
 
-          await _filterPedidos();
+await _filterPedidos(); 
         }
       }
     } catch (e) {
