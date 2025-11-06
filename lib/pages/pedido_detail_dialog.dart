@@ -20,6 +20,20 @@ class PedidoDetailDialog extends StatelessWidget {
     required this.produtosParsed,
   }) : super(key: key);
 
+
+  /// Função estática para impressão automática (chamada pelo polling)
+static Future<void> printOrderAutomatically(
+  BuildContext context,
+  dynamic pedido,
+  List<Map<String, String>> produtosParsed,
+) async {
+  final dialog = PedidoDetailDialog(
+    pedido: pedido,
+    produtosParsed: produtosParsed,
+  );
+  await dialog.printDirectly(context, pedido, produtosParsed, markSheets: true);
+}
+
   // Mapeia nomes de pagamento para exibição
   static const Map<String, String> _paymentDisplayMap = {
     'Crédito Site': 'Pago! (Cartão de Crédito)',

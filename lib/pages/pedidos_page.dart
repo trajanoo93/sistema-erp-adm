@@ -9,7 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../globals.dart';
 import '../services/gas_api.dart';
 import 'pedido_detail_dialog.dart';
-import 'auth_page.dart'; // <-- Adicionado: necessário para AuthPage
+import 'auth_page.dart';
 
 class LtrTextField extends StatelessWidget {
   final String labelText;
@@ -128,7 +128,7 @@ class _PedidosPageState extends State<PedidosPage> {
     if (currentUser == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => AuthPage()), // <-- Removido 'const'
+          MaterialPageRoute(builder: (_) => AuthPage()),
         );
       });
       return;
@@ -319,6 +319,34 @@ class _PedidosPageState extends State<PedidosPage> {
               );
             }
           });
+
+          // === IMPRESSÃO AUTOMÁTICA DE NOVOS PEDIDOS ===
+          final List<Pedido> novosPedidos = [];
+          for (final pedido in updatedPedidos) {
+            final id = _canonicalId(pedido.id);
+            if (!_printedPedidoIds.contains(id)) {
+              novosPedidos.add(pedido);
+            }
+          }
+
+          if (novosPedidos.isNotEmpty) {
+            for (final pedido in novosPedidos) {
+              final id = _canonicalId(pedido.id);
+              final produtosParsed = parseProdutos(pedido.produtos ?? '');
+PedidoDetailDialog.printOrderAutomatically(
+  context,
+  pedido.toJson(),
+  produtosParsed,
+).then((_) {
+  _printedPedidoIds.add(id);
+  _savePrintedPedidoIds();
+}).catchError((e) {
+  debugPrint('Erro ao imprimir pedido $id: $e');
+});
+            }
+          }
+          // === FIM DA IMPRESSÃO AUTOMÁTICA ===
+
           await _filterPedidos();
         }
       }
@@ -333,46 +361,45 @@ class _PedidosPageState extends State<PedidosPage> {
   }
 
   Future<void> _filterPedidos() async {
-  if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
-  _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
-    List<Pedido> tempList = List<Pedido>.from(_allPedidos);
+    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
+    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
+      List<Pedido> tempList = List<Pedido>.from(_allPedidos);
 
-    if (_searchText.isNotEmpty) {
-      final searchLower = _searchText.toLowerCase();
-      tempList = tempList.where((pedido) {
-        final idStr = (pedido.id ?? '').toLowerCase();
-        final nome = (pedido.nome ?? '').toLowerCase();
-        return idStr.contains(searchLower) || nome.contains(searchLower);
-      }).toList();
-    }
+      if (_searchText.isNotEmpty) {
+        final searchLower = _searchText.toLowerCase();
+        tempList = tempList.where((pedido) {
+          final idStr = (pedido.id ?? '').toLowerCase();
+          final nome = (pedido.nome ?? '').toLowerCase();
+          return idStr.contains(searchLower) || nome.contains(searchLower);
+        }).toList();
+      }
 
-    if (_selectedStatus != 'Todos') {
-      tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() == _selectedStatus.toLowerCase()).toList();
-    }
+      if (_selectedStatus != 'Todos') {
+        tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() == _selectedStatus.toLowerCase()).toList();
+      }
 
-    if (_hideCompleted) {
-      tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() != 'concluído').toList();
-    }
+      if (_hideCompleted) {
+        tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() != 'concluído').toList();
+      }
 
-    // ✅ ADICIONE ESTE BLOCO:
-    if (_startDate != null && _endDate != null) {
-      tempList = tempList.where((pedido) {
-        final dataAgendamento = pedido.dataAgendamento?.isNotEmpty == true 
-            ? pedido.dataAgendamento 
-            : pedido.data;
-        final dt = _parseDateRobust(dataAgendamento);
-        if (dt == null) return false;
-        return dt.isAfter(_startDate!.subtract(const Duration(seconds: 1))) && 
-               dt.isBefore(_endDate!.add(const Duration(seconds: 1)));
-      }).toList();
-    }
+      if (_startDate != null && _endDate != null) {
+        tempList = tempList.where((pedido) {
+          final dataAgendamento = pedido.dataAgendamento?.isNotEmpty == true 
+              ? pedido.dataAgendamento 
+              : pedido.data;
+          final dt = _parseDateRobust(dataAgendamento);
+          if (dt == null) return false;
+          return dt.isAfter(_startDate!.subtract(const Duration(seconds: 1))) && 
+                 dt.isBefore(_endDate!.add(const Duration(seconds: 1)));
+        }).toList();
+      }
 
-    tempList.sort(_compareAgendamento);
-    if (mounted) {
-      setState(() => _filteredPedidos = tempList);
-    }
-  });
-}
+      tempList.sort(_compareAgendamento);
+      if (mounted) {
+        setState(() => _filteredPedidos = tempList);
+      }
+    });
+  }
 
   DateTime? _parseDateRobust(String? dateStr) {
     if (dateStr == null || dateStr.isEmpty) return null;
@@ -634,24 +661,24 @@ class _PedidosPageState extends State<PedidosPage> {
                             formatHorario: _formatHorario,
                             formatDataAgendamento: _formatoDataAgendamento,
                             onStatusChanged: (newStatus) async {
-  try {
-    await GasApi.updateStatus(pedido.id ?? '', newStatus);
-    setState(() {
-      final idx = _allPedidos.indexWhere((p) => p.id == pedido.id);
-      if (idx != -1) {
-        _allPedidos[idx] = _allPedidos[idx].copyWith(status: newStatus);
-      }
-      _filteredPedidos = List.from(_allPedidos);  // ← Atualiza lista completa
-    });
-    await _filterPedidos();  // ← MANTÉM O FILTRO
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erro ao atualizar status: $e')),
-      );
-    }
-  }
-},
+                              try {
+                                await GasApi.updateStatus(pedido.id ?? '', newStatus);
+                                setState(() {
+                                  final idx = _allPedidos.indexWhere((p) => p.id == pedido.id);
+                                  if (idx != -1) {
+                                    _allPedidos[idx] = _allPedidos[idx].copyWith(status: newStatus);
+                                  }
+                                  _filteredPedidos = List.from(_allPedidos);
+                                });
+                                await _filterPedidos();
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Erro ao atualizar status: $e')),
+                                  );
+                                }
+                              }
+                            },
                             onTap: () => _openPedidoSideSheet(pedido),
                           );
                         },
@@ -921,7 +948,7 @@ class PedidoCard extends StatelessWidget {
     }
 
     final agendamentoDate = formatDataAgendamento(pedido.dataAgendamento?.isNotEmpty == true ? pedido.dataAgendamento : pedido.data);
-    final agendamentoHorario = pedido.horarioAgendamento ?? ''; // <-- Garantido como String
+    final agendamentoHorario = pedido.horarioAgendamento ?? '';
 
     return InkWell(
       onTap: onTap,
@@ -1007,33 +1034,33 @@ class PedidoCard extends StatelessWidget {
             Row(
               children: [
                 Container(
-  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-  decoration: BoxDecoration(
-    color: Colors.grey[50],
-    borderRadius: BorderRadius.circular(12),
-    border: Border.all(color: Colors.grey[300]!),
-  ),
-  child: DropdownButtonHideUnderline(
-    child: DropdownButton<String>(
-      value: pedido.status ?? 'Registrado',
-      isDense: true,
-      icon: Icon(Icons.arrow_drop_down_rounded, size: 20, color: primaryColor),
-      dropdownColor: Colors.white,
-      style: TextStyle(fontSize: 13.5, color: Colors.black87, fontWeight: FontWeight.w600),
-      items: orderStatusOptions
-          .map((s) => DropdownMenuItem<String>(
-                value: s,
-                child: Text(s, style: const TextStyle(fontSize: 13.5)),
-              ))
-          .toList(),
-      onChanged: (newValue) {
-        if (newValue != null && newValue != pedido.status) {
-          onStatusChanged(newValue);
-        }
-      },
-    ),
-  ),
-),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: pedido.status ?? 'Registrado',
+                      isDense: true,
+                      icon: Icon(Icons.arrow_drop_down_rounded, size: 20, color: primaryColor),
+                      dropdownColor: Colors.white,
+                      style: TextStyle(fontSize: 13.5, color: Colors.black87, fontWeight: FontWeight.w600),
+                      items: orderStatusOptions
+                          .map((s) => DropdownMenuItem<String>(
+                                value: s,
+                                child: Text(s, style: const TextStyle(fontSize: 13.5)),
+                              ))
+                          .toList(),
+                      onChanged: (newValue) {
+                        if (newValue != null && newValue != pedido.status) {
+                          onStatusChanged(newValue);
+                        }
+                      },
+                    ),
+                  ),
+                ),
                 const Spacer(),
                 Row(
                   children: [
@@ -1055,7 +1082,7 @@ class PedidoCard extends StatelessWidget {
                     Icon(Icons.access_time_filled_rounded, size: 16, color: Colors.grey[700]),
                     const SizedBox(width: 6),
                     Text(
-                      agendamentoHorario, // <-- Agora sempre String
+                      agendamentoHorario,
                       style: TextStyle(fontSize: 12.5, color: Colors.grey[800], fontWeight: FontWeight.w600),
                     ),
                   ],
