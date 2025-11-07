@@ -181,6 +181,44 @@ void initState() {
     return s;
   }
 
+ 
+Future<void> _applyPrintingLogic() async {
+  final hoje = DateTime.now().toIso8601String().substring(0, 10);
+  final List<Pedido> novosPedidos = [];
+
+  for (final pedido in _allPedidos) {
+    final id = _canonicalId(pedido.id);
+    final dataUsar = pedido.dataAgendamento?.isNotEmpty == true 
+        ? pedido.dataAgendamento 
+        : pedido.data;
+    final dataPedido = dataUsar?.substring(0, 10);
+
+    if (!_printedPedidoIds.contains(id) && dataPedido == hoje) {
+      novosPedidos.add(pedido);
+    }
+  }
+
+  if (novosPedidos.isNotEmpty) {
+    for (final pedido in novosPedidos) {
+      final id = _canonicalId(pedido.id);
+      final produtosParsed = parseProdutos(pedido.produtos ?? '');
+
+      unawaited(
+        PedidoDetailDialog.printOrderAutomatically(
+          context,
+          pedido.toJson(),
+          produtosParsed,
+        ).then((_) {
+          _printedPedidoIds.add(id);
+          _savePrintedPedidoIds();
+        }).catchError((e) {
+          debugPrint('Erro ao imprimir pedido $id: $e');
+        }),
+      );
+    }
+  }
+}
+
   Future<void> _openPedidoSideSheet(Pedido pedido) async {
     final produtosParsed = parseProdutos(pedido.produtos ?? '');
     await showGeneralDialog(
@@ -324,42 +362,7 @@ void initState() {
             }
           });
 
-    // === IMPRESSÃO AUTOMÁTICA DE NOVOS PEDIDOS ===
-final List<Pedido> novosPedidos = [];
-final hoje = DateTime.now().toIso8601String().substring(0, 10);
-
-for (final pedido in updatedPedidos) {
-  final id = _canonicalId(pedido.id);
-  final dataUsar = pedido.dataAgendamento?.isNotEmpty == true 
-      ? pedido.dataAgendamento 
-      : pedido.data;
-  final dataPedido = dataUsar?.substring(0, 10);
-
-  if (!_printedPedidoIds.contains(id) && dataPedido == hoje) {
-    novosPedidos.add(pedido);
-  }
-}
-
-if (novosPedidos.isNotEmpty) {
-  for (final pedido in novosPedidos) {
-    final id = _canonicalId(pedido.id);
-    final produtosParsed = parseProdutos(pedido.produtos ?? '');
-
-    unawaited(
-      PedidoDetailDialog.printOrderAutomatically(
-        context,
-        pedido.toJson(),
-        produtosParsed,
-      ).then((_) {
-        _printedPedidoIds.add(id);
-        _savePrintedPedidoIds();
-      }).catchError((e) {
-        debugPrint('Erro ao imprimir pedido $id: $e');
-      }),
-    );
-  }
-}
-// === FIM DA IMPRESSÃO AUTOMÁTICA ===
+          _applyPrintingLogic();
 
 await _filterPedidos(); 
         }
