@@ -1,7 +1,7 @@
 // lib/pages/auth_page.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:sistema_erp_cd/provider/auth_provider.dart';
+import '../provider/auth_provider.dart';
 import 'home_page.dart';
 
 class AuthPage extends StatefulWidget {

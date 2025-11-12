@@ -1,1111 +1,952 @@
 // lib/pages/pedidos_page.dart
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
-import '../globals.dart';
-import '../services/gas_api.dart';
-import 'pedido_detail_dialog.dart';
-import 'auth_page.dart';
-
-class LtrTextField extends StatelessWidget {
-  final String labelText;
-  final TextEditingController controller;
-  final FocusNode focusNode;
-  final Function(String) onChanged;
-  final List<TextInputFormatter> inputFormatters;
-
-  const LtrTextField({
-    super.key,
-    required this.labelText,
-    required this.controller,
-    required this.focusNode,
-    required this.onChanged,
-    required this.inputFormatters,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = const Color(0xFFF28C38);
-
-    return TextFormField(
-      controller: controller,
-      focusNode: focusNode,
-      decoration: InputDecoration(
-        hintText: labelText,
-        prefixIcon: Icon(Icons.search_rounded, color: primary),
-        suffixIcon: controller.text.isNotEmpty
-            ? IconButton(
-                tooltip: 'Limpar',
-                icon: const Icon(Icons.close_rounded, size: 18),
-                onPressed: () {
-                  controller.clear();
-                  onChanged('');
-                },
-              )
-            : null,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        filled: true,
-        fillColor: Colors.grey[50],
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(24),
-          borderSide: BorderSide(color: primary, width: 1.2),
-        ),
-      ),
-      textAlign: TextAlign.left,
-      inputFormatters: inputFormatters,
-      keyboardType: TextInputType.text,
-      onChanged: onChanged,
-      onEditingComplete: () {
-        if (!focusNode.hasFocus) {
-          FocusScope.of(context).requestFocus(focusNode);
-        }
-      },
-    );
-  }
-}
+import '../design_system.dart';
 
 class PedidosPage extends StatefulWidget {
   const PedidosPage({Key? key}) : super(key: key);
-
   @override
   State<PedidosPage> createState() => _PedidosPageState();
 }
 
 class _PedidosPageState extends State<PedidosPage> {
-  final Color primaryColor = const Color(0xFFF28C38);
+  final _scrollController = ScrollController();
+  final _searchController = TextEditingController();
 
-  List<Pedido> _allPedidos = [];
-  List<Pedido> _filteredPedidos = [];
-  List<String> _previousPedidoIds = [];
-  List<String> _printedPedidoIds = [];
-  List<Pedido> _problematicPedidos = [];
+  // FILTROS
+  String _cdFiltro = 'CD Central';
+  DateTime? _dataInicial;
+  DateTime? _dataFinal;
+  String _busca = '';
+  Set<String> _statusFiltros = {}; // Múltiplos status selecionados
 
-  String _searchText = '';
-  DateTime? _startDate;
-  DateTime? _endDate;
+  final _cds = ['CD Central', 'CD Sion', 'CD Barreiro', 'CD Lagoa Santa', 'Todos'];
 
-  final TextEditingController _startDateController = TextEditingController();
-  final TextEditingController _endDateController = TextEditingController();
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocusNode = FocusNode();
-
-  String _selectedStatus = 'Todos';
-  bool _hideCompleted = false;
-  bool _isInitialLoading = true;
-
-  Timer? _debounceTimer;
-  Timer? _fetchTimer;
-
-  final List<String> _statusOptions = ['Todos', 'Registrado', 'Saiu pra Entrega', 'Concluído', 'Cancelado'];
-  final List<String> _orderStatusOptions = [
-    '-',
-    'Registrado',
-    'Agendado',
-    'Saiu pra Entrega',
-    'Concluído',
-    'Cancelado',
-  ];
-
-  bool _isFetching = false;
-  final Set<String> _printingNow = {};
-
- @override
-void initState() {
-  super.initState();
-
-  if (currentUser == null) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => AuthPage()),
-      );
-    });
-    return;
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() => setState(() => _busca = _searchController.text.toLowerCase()));
+    // Define data inicial e final como hoje por padrão
+    final hoje = DateTime.now();
+    _dataInicial = DateTime(hoje.year, hoje.month, hoje.day);
+    _dataFinal = DateTime(hoje.year, hoje.month, hoje.day, 23, 59, 59);
   }
-
-  final now = DateTime.now();
-  _startDate = DateTime(now.year, now.month, now.day, 0, 0, 0);
-  _endDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
-  _startDateController.text = DateFormat('dd/MM/yyyy').format(_startDate!);
-  _endDateController.text = DateFormat('dd/MM/yyyy').format(_endDate!);
-  _searchController.text = _searchText;
-
-  _searchController.addListener(() {
-    if (_searchController.text != _searchText) {
-      setState(() => _searchText = _searchController.text);
-      _filterPedidos();
-    }
-  });
-
- _loadPreviousPedidoIds().then((_) async {
-  await _loadPrintedPedidoIds();
-  await _fetchPedidosSilently();
-  if (mounted) {
-    setState(() => _isInitialLoading = false);
-    await _filterPedidos(); // ← FORÇA O FILTRO
-  }
-});
-
-  _fetchTimer = Timer.periodic(const Duration(minutes: 1), (_) => _fetchPedidosSilently());
-}
-
 
   @override
   void dispose() {
-    _fetchTimer?.cancel();
-    _debounceTimer?.cancel();
-    _startDateController.dispose();
-    _endDateController.dispose();
     _searchController.dispose();
-    _searchFocusNode.dispose();
-    GasApi.dispose();
+    _scrollController.dispose();
     super.dispose();
-  }
-
-  String _canonicalId(String? raw) {
-    if (raw == null) return '';
-    var s = raw.trim();
-    if (s.endsWith('.0')) s = s.substring(0, s.length - 2);
-    s = s.replaceAll(RegExp(r'[^0-9A-Za-z\-]'), '');
-    return s;
-  }
-
- 
-Future<void> _applyPrintingLogic() async {
-  final hoje = DateTime.now().toIso8601String().substring(0, 10);
-  final List<Pedido> novosPedidos = [];
-
-  for (final pedido in _allPedidos) {
-    final id = _canonicalId(pedido.id);
-    final dataUsar = pedido.dataAgendamento?.isNotEmpty == true 
-        ? pedido.dataAgendamento 
-        : pedido.data;
-    final dataPedido = dataUsar?.substring(0, 10);
-
-    if (!_printedPedidoIds.contains(id) && dataPedido == hoje) {
-      novosPedidos.add(pedido);
-    }
-  }
-
-  if (novosPedidos.isNotEmpty) {
-    for (final pedido in novosPedidos) {
-      final id = _canonicalId(pedido.id);
-      final produtosParsed = parseProdutos(pedido.produtos ?? '');
-
-      unawaited(
-        PedidoDetailDialog.printOrderAutomatically(
-          context,
-          pedido.toJson(),
-          produtosParsed,
-        ).then((_) {
-          _printedPedidoIds.add(id);
-          _savePrintedPedidoIds();
-        }).catchError((e) {
-          debugPrint('Erro ao imprimir pedido $id: $e');
-        }),
-      );
-    }
-  }
-}
-
-  Future<void> _openPedidoSideSheet(Pedido pedido) async {
-    final produtosParsed = parseProdutos(pedido.produtos ?? '');
-    await showGeneralDialog(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: 'Fechar',
-      barrierColor: Colors.black.withOpacity(0.25),
-      transitionDuration: const Duration(milliseconds: 300),
-      pageBuilder: (context, anim, secondaryAnim) {
-        final w = MediaQuery.of(context).size.width;
-        final sheetWidth = (w * 0.40).clamp(360.0, 640.0);
-
-        return Align(
-          alignment: Alignment.centerRight,
-          child: SizedBox(
-            width: sheetWidth,
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                bottomLeft: Radius.circular(16),
-              ),
-              child: Material(
-                color: Colors.white,
-                elevation: 16,
-                child: PedidoDetailDialog(
-                  pedido: pedido.toJson(),
-                  produtosParsed: produtosParsed,
-                ),
-              ),
-            ),
-          ),
-        );
-      },
-      transitionBuilder: (context, anim, _, child) {
-        final slide = Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero)
-            .chain(CurveTween(curve: Curves.easeOutCubic))
-            .animate(anim);
-        final fade = CurvedAnimation(parent: anim, curve: Curves.easeOut);
-        return SlideTransition(position: slide, child: FadeTransition(opacity: fade, child: child));
-      },
-    );
-  }
-
-  Future<void> _loadPreviousPedidoIds() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final appDir = Directory('${dir.path}/ERPUnificado');
-    if (!appDir.existsSync()) appDir.createSync(recursive: true);
-    final file = File('${appDir.path}/previous_pedido_ids.json');
-    if (await file.exists()) {
-      _previousPedidoIds = List<String>.from(jsonDecode(await file.readAsString()));
-    }
-  }
-
-  Future<void> _loadPrintedPedidoIds() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final appDir = Directory('${dir.path}/ERPUnificado');
-    final file = File('${appDir.path}/printed_pedido_ids.json');
-    if (await file.exists()) {
-      _printedPedidoIds = List<String>.from(jsonDecode(await file.readAsString()));
-    }
-  }
-
-  Future<void> _savePreviousPedidoIds() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final appDir = Directory('${dir.path}/ERPUnificado');
-    final file = File('${appDir.path}/previous_pedido_ids.json');
-    await file.writeAsString(jsonEncode(_previousPedidoIds));
-  }
-
-  Future<void> _savePrintedPedidoIds() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final appDir = Directory('${dir.path}/ERPUnificado');
-    final file = File('${appDir.path}/printed_pedido_ids.json');
-    await file.writeAsString(jsonEncode(_printedPedidoIds));
-  }
-
-  Future<File> _getLogFile() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final appDir = Directory('${dir.path}/ERPUnificado');
-    if (!appDir.existsSync()) appDir.createSync(recursive: true);
-    final logFile = File('${appDir.path}/fetch_logs.txt');
-    if (!await logFile.exists()) {
-      await logFile.create();
-    }
-    return logFile;
-  }
-
-  Future<void> _fetchPedidosSilently() async {
-    if (_isFetching) return;
-    _isFetching = true;
-    IOSink? logSink;
-    try {
-      final List<Pedido> newPedidos = await GasApi.readPedidos();
-      final logFile = await _getLogFile();
-      logSink = logFile.openWrite(mode: FileMode.append);
-
-      final List<Pedido> problematic = [];
-      for (var pedido in newPedidos) {
-        final logLine = 'Pedido ${pedido.id}: giftDesconto=${pedido.giftDesconto}, JSON=${jsonEncode(pedido.toJson())}\n';
-        logSink.write(logLine);
-        if (DateTime.tryParse(pedido.dataAgendamento ?? '') == null && (pedido.dataAgendamento?.isNotEmpty ?? false)) {
-          problematic.add(pedido);
-          logSink.write('ERRO: Pedido ${pedido.id} tem data_agendamento inválida: ${pedido.dataAgendamento}\n');
-        }
-      }
-      logSink.write('Pedidos retornados: ${newPedidos.length}, Problemáticos: ${problematic.length}\n');
-
-      if (newPedidos.isNotEmpty) {
-        final seen = <String>{};
-        final deduped = <Pedido>[];
-        for (final p in newPedidos) {
-          final key = _canonicalId(p.id);
-          if (seen.add(key)) deduped.add(p);
-        }
-
-        final merged = <String, Pedido>{};
-        for (final p in _allPedidos) {
-          merged[_canonicalId(p.id)] = p;
-        }
-        for (final p in deduped) {
-          merged[_canonicalId(p.id)] = p;
-        }
-
-        final updatedPedidos = merged.values.toList()..sort(_compareAgendamento);
-        final List<String> newIdsCanonical = deduped.map<String>((p) => _canonicalId(p.id)).toList();
-
-        if (mounted) {
-          setState(() {
-            _allPedidos = updatedPedidos;
-            _filteredPedidos = List<Pedido>.from(_allPedidos);
-            _previousPedidoIds = newIdsCanonical;
-            _problematicPedidos = problematic;
-            if (problematic.isNotEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${problematic.length} pedido(s) com data inválida.'),
-                  duration: const Duration(seconds: 5),
-                  backgroundColor: Colors.redAccent,
-                ),
-              );
-            }
-          });
-
-          _applyPrintingLogic();
-
-await _filterPedidos(); 
-        }
-      }
-    } catch (e) {
-      debugPrint('Erro ao buscar pedidos: $e');
-      logSink?.write('Erro ao buscar pedidos: $e\n');
-    } finally {
-      await logSink?.close();
-      _isFetching = false;
-      await _savePreviousPedidoIds();
-    }
-  }
-
-  Future<void> _filterPedidos() async {
-    if (_debounceTimer?.isActive ?? false) _debounceTimer!.cancel();
-    _debounceTimer = Timer(const Duration(milliseconds: 350), () async {
-      List<Pedido> tempList = List<Pedido>.from(_allPedidos);
-
-      if (_searchText.isNotEmpty) {
-        final searchLower = _searchText.toLowerCase();
-        tempList = tempList.where((pedido) {
-          final idStr = (pedido.id ?? '').toLowerCase();
-          final nome = (pedido.nome ?? '').toLowerCase();
-          return idStr.contains(searchLower) || nome.contains(searchLower);
-        }).toList();
-      }
-
-      if (_selectedStatus != 'Todos') {
-        tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() == _selectedStatus.toLowerCase()).toList();
-      }
-
-      if (_hideCompleted) {
-        tempList = tempList.where((pedido) => (pedido.status ?? '').toLowerCase() != 'concluído').toList();
-      }
-
-      if (_startDate != null && _endDate != null) {
-        tempList = tempList.where((pedido) {
-          final dataAgendamento = pedido.dataAgendamento?.isNotEmpty == true 
-              ? pedido.dataAgendamento 
-              : pedido.data;
-          final dt = _parseDateRobust(dataAgendamento);
-          if (dt == null) return false;
-          return dt.isAfter(_startDate!.subtract(const Duration(seconds: 1))) && 
-                 dt.isBefore(_endDate!.add(const Duration(seconds: 1)));
-        }).toList();
-      }
-
-      tempList.sort(_compareAgendamento);
-      if (mounted) {
-        setState(() => _filteredPedidos = tempList);
-      }
-    });
-  }
-
-  DateTime? _parseDateRobust(String? dateStr) {
-    if (dateStr == null || dateStr.isEmpty) return null;
-    try {
-      return DateTime.tryParse(dateStr)?.toLocal();
-    } catch (_) {
-      try {
-        if (dateStr.contains('/')) {
-          final parts = dateStr.split('/');
-          if (parts.length == 3) {
-            return DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
-          }
-        }
-      } catch (_) {
-        try {
-          return DateFormat('MMMM dd, yyyy').parse(dateStr, true).toLocal();
-        } catch (_) {
-          return null;
-        }
-      }
-      return null;
-    }
-  }
-
-  DateTime? _parseAgendamentoToDateTime(String? dataAgendamento, String? horarioAgendamento) {
-    try {
-      if (dataAgendamento?.isEmpty ?? true) return null;
-      final date = _parseDateRobust(dataAgendamento);
-      if (date == null) return null;
-      final horarioParts = (horarioAgendamento ?? '').split(' - ');
-      if (horarioParts.isEmpty || horarioParts[0].isEmpty) return null;
-      final timeFormat = DateFormat('HH:mm');
-      final time = timeFormat.parse(horarioParts[0].trim());
-      return DateTime(date.year, date.month, date.day, time.hour, time.minute);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  DateTime? _parseHorarioCriacao(String? horario) {
-    try {
-      if (horario?.isEmpty ?? true) return null;
-      final timeFormat = DateFormat('HH:mm');
-      return timeFormat.parse(horario!);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  int _compareAgendamento(Pedido a, Pedido b) {
-    final dataAgendamentoA = a.dataAgendamento?.isNotEmpty == true ? a.dataAgendamento : a.data;
-    final horarioAgendamentoA = a.horarioAgendamento;
-    final dataAgendamentoB = b.dataAgendamento?.isNotEmpty == true ? b.dataAgendamento : b.data;
-    final horarioAgendamentoB = b.horarioAgendamento;
-
-    final dateTimeAgendamentoA = _parseAgendamentoToDateTime(dataAgendamentoA, horarioAgendamentoA);
-    final dateTimeAgendamentoB = _parseAgendamentoToDateTime(dataAgendamentoB, horarioAgendamentoB);
-
-    if (dateTimeAgendamentoA == null && dateTimeAgendamentoB == null) return 0;
-    if (dateTimeAgendamentoA == null) return 1;
-    if (dateTimeAgendamentoB == null) return -1;
-    final compare = dateTimeAgendamentoA.compareTo(dateTimeAgendamentoB);
-    if (compare != 0) return compare;
-
-    final horarioA = a.horario;
-    final horarioB = b.horario;
-    final dateTimeCriacaoA = _parseHorarioCriacao(horarioA);
-    final dateTimeCriacaoB = _parseHorarioCriacao(horarioB);
-
-    if (dateTimeCriacaoA == null && dateTimeCriacaoB == null) return 0;
-    if (dateTimeCriacaoA == null) return 1;
-    if (dateTimeCriacaoB == null) return -1;
-    return dateTimeCriacaoA.compareTo(dateTimeCriacaoB);
-  }
-
-  Future<void> _pickStartDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _startDate ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-    if (picked != null) {
-      _startDate = DateTime(picked.year, picked.month, picked.day, 0, 0, 0);
-      _startDateController.text = DateFormat('dd/MM/yyyy').format(_startDate!);
-      await _filterPedidos();
-      if (mounted) setState(() {});
-    }
-  }
-
-  Future<void> _pickEndDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _endDate ?? DateTime.now(),
-      firstDate: DateTime(2020),
-      lastDate: DateTime(2100),
-    );
-    if (picked != null) {
-      _endDate = DateTime(picked.year, picked.month, picked.day, 23, 59, 59);
-      _endDateController.text = DateFormat('dd/MM/yyyy').format(_endDate!);
-      await _filterPedidos();
-      if (mounted) setState(() {});
-    }
-  }
-
-  String _formatHorario(String? raw) {
-    if (raw == null) return '';
-    final reg = RegExp(r'(\d{2}):(\d{2}):(\d{2})');
-    final match = reg.firstMatch(raw);
-    if (match != null) {
-      final hh = match.group(1);
-      final mm = match.group(2);
-      if (hh != null && mm != null) {
-        return '$hh:$mm';
-      }
-    }
-    return raw;
-  }
-
-  String _formatoDataAgendamento(String? iso) {
-    if (iso == null || iso.isEmpty) return 'Data não informada';
-    final dt = _parseDateRobust(iso);
-    if (dt != null) {
-      return DateFormat('dd/MM/yyyy').format(dt);
-    }
-    return 'Data inválida: $iso';
-  }
-
-  List<Map<String, String>> parseProdutos(String? produtosRaw) {
-    final List<Map<String, String>> produtos = [];
-    if (produtosRaw == null || produtosRaw.isEmpty) return produtos;
-    final List<String> items = produtosRaw.split('*\n').where((item) => item.trim().isNotEmpty).toList();
-
-    for (String item in items) {
-      final cleanItem = item.trim().endsWith('*') ? item.substring(0, item.length - 1).trim() : item.trim();
-      final qtdMatch = RegExp(r'\(Qtd:\s*(\d+)\)').firstMatch(cleanItem);
-      if (qtdMatch != null) {
-        final qtd = qtdMatch.group(1)!;
-        final nomePart = cleanItem.split('(Qtd:')[0].trim();
-        final afterQtd = cleanItem.split('(Qtd:')[1];
-        final variationsAndPeso = afterQtd.substring(qtd.length + 1).trim();
-        String displayString = nomePart;
-        if (variationsAndPeso.isNotEmpty) {
-          displayString += ' $variationsAndPeso';
-        }
-        produtos.add({'nome': displayString.trim(), 'qtd': qtd});
-      }
-    }
-    return produtos;
-  }
-
-  void _showProblematicPedidosDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Pedidos com Problemas'),
-        content: _problematicPedidos.isEmpty
-            ? const Text('Nenhum pedido com problemas detectado.')
-            : SizedBox(
-                width: double.maxFinite,
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _problematicPedidos.length,
-                  itemBuilder: (context, index) {
-                    final pedido = _problematicPedidos[index];
-                    return ListTile(
-                      leading: const Icon(Icons.warning_rounded, color: Colors.redAccent),
-                      title: Text('Pedido #${pedido.id}'),
-                      subtitle: Text('Data inválida: ${pedido.dataAgendamento}'),
-                      onTap: () => _openPedidoSideSheet(pedido),
-                    );
-                  },
-                ),
-              ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fechar'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.bgPrimary,
       body: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: const Offset(0, 6))],
-              border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.15))),
-            ),
-            child: FilterPanel(
-              searchText: _searchText,
-              searchController: _searchController,
-              startDateController: _startDateController,
-              endDateController: _endDateController,
-              selectedStatus: _selectedStatus,
-              hideCompleted: _hideCompleted,
-              filteredCount: _filteredPedidos.length,
-              statusOptions: _statusOptions,
-              searchFocusNode: _searchFocusNode,
-              onSearchChanged: (value) {},
-              onPickStartDate: _pickStartDate,
-              onPickEndDate: _pickEndDate,
-              onStatusChanged: (value) {
-                if (value != null) {
-                  setState(() => _selectedStatus = value);
-                  _filterPedidos();
-                }
-              },
-              onHideCompletedChanged: (value) {
-                setState(() => _hideCompleted = value);
-                _filterPedidos();
-              },
-            ),
-          ),
-
-          if (_problematicPedidos.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: ElevatedButton.icon(
-                onPressed: _showProblematicPedidosDialog,
-                icon: const Icon(Icons.warning_rounded, color: Colors.white),
-                label: Text(
-                  '${_problematicPedidos.length} Pedido(s) com Problemas',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-            ),
-
-          if (_isInitialLoading)
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Center(child: CircularProgressIndicator(color: Color(0xFFF28C38))),
-            ),
-
-          Expanded(
-            child: _isInitialLoading
-                ? const SizedBox.shrink()
-                : _filteredPedidos.isEmpty
-                    ? const Center(child: Text('Nenhum pedido encontrado.', style: TextStyle(color: Colors.grey, fontSize: 16)))
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        itemCount: _filteredPedidos.length,
-                        itemBuilder: (context, index) {
-                          final pedido = _filteredPedidos[index];
-                          return PedidoCard(
-                            pedido: pedido,
-                            orderStatusOptions: _orderStatusOptions,
-                            formatHorario: _formatHorario,
-                            formatDataAgendamento: _formatoDataAgendamento,
-                            onStatusChanged: (newStatus) async {
-                              try {
-                                await GasApi.updateStatus(pedido.id ?? '', newStatus);
-                                setState(() {
-                                  final idx = _allPedidos.indexWhere((p) => p.id == pedido.id);
-                                  if (idx != -1) {
-                                    _allPedidos[idx] = _allPedidos[idx].copyWith(status: newStatus);
-                                  }
-                                  _filteredPedidos = List.from(_allPedidos);
-                                });
-                                await _filterPedidos();
-                              } catch (e) {
-                                if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Erro ao atualizar status: $e')),
-                                  );
-                                }
-                              }
-                            },
-                            onTap: () => _openPedidoSideSheet(pedido),
-                          );
-                        },
-                      ),
-          ),
+          _buildHeaderCompacto(),
+          _buildFiltrosCompactos(),
+          Expanded(child: _buildPedidosStream()),
         ],
       ),
     );
   }
-}
 
-// === RESTANTE DO ARQUIVO ===
-class FilterPanel extends StatelessWidget {
-  final String searchText;
-  final TextEditingController searchController;
-  final TextEditingController startDateController;
-  final TextEditingController endDateController;
-  final String selectedStatus;
-  final bool hideCompleted;
-  final int filteredCount;
-  final List<String> statusOptions;
-  final Function(String) onSearchChanged;
-  final VoidCallback onPickStartDate;
-  final VoidCallback onPickEndDate;
-  final Function(String?) onStatusChanged;
-  final Function(bool) onHideCompletedChanged;
-  final FocusNode searchFocusNode;
-
-  const FilterPanel({
-    super.key,
-    required this.searchText,
-    required this.searchController,
-    required this.startDateController,
-    required this.endDateController,
-    required this.selectedStatus,
-    required this.hideCompleted,
-    required this.filteredCount,
-    required this.statusOptions,
-    required this.onSearchChanged,
-    required this.onPickStartDate,
-    required this.onPickEndDate,
-    required this.onStatusChanged,
-    required this.onHideCompletedChanged,
-    required this.searchFocusNode,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = const Color(0xFFF28C38);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: LtrTextField(
-                labelText: 'Buscar ID ou Nome',
-                controller: searchController,
-                focusNode: searchFocusNode,
-                onChanged: onSearchChanged,
-                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9\s]'))],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: primary.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: primary.withOpacity(0.2)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.inbox_rounded, size: 16, color: primary),
-                  const SizedBox(width: 6),
-                  Text(
-                    '$filteredCount pedido${filteredCount != 1 ? 's' : ''}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: primary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            _DateField(
-              label: 'Data inicial',
-              controller: startDateController,
-              onTap: onPickStartDate,
-            ),
-            _DateField(
-              label: 'Data final',
-              controller: endDateController,
-              onTap: onPickEndDate,
-            ),
-            SizedBox(
-              height: 40,
-              child: ListView.separated(
-                shrinkWrap: true,
-                scrollDirection: Axis.horizontal,
-                itemCount: statusOptions.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (_, i) {
-                  final s = statusOptions[i];
-                  final selected = s == selectedStatus;
-                  return ChoiceChip(
-                    label: Text(s),
-                    selected: selected,
-                    onSelected: (_) => onStatusChanged(s),
-                    pressElevation: 0,
-                    selectedColor: primary.withOpacity(0.15),
-                    labelStyle: TextStyle(
-                      color: selected ? primary : Colors.black87,
-                      fontWeight: FontWeight.w600,
-                    ),
-                    shape: StadiumBorder(
-                      side: BorderSide(
-                        color: selected ? primary.withOpacity(0.4) : Colors.grey.withOpacity(0.25),
-                      ),
-                    ),
-                    backgroundColor: Colors.white,
-                  );
-                },
-              ),
-            ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('Ocultar concluídos', style: TextStyle(fontWeight: FontWeight.w500)),
-                const SizedBox(width: 6),
-                Switch(
-                  value: hideCompleted,
-                  onChanged: onHideCompletedChanged,
-                  activeColor: primary,
-                  activeTrackColor: primary.withOpacity(0.4),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-}
-
-class _DateField extends StatelessWidget {
-  final String label;
-  final TextEditingController controller;
-  final VoidCallback onTap;
-
-  const _DateField({
-    required this.label,
-    required this.controller,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = const Color(0xFFF28C38);
-    return SizedBox(
-      width: 220,
-      child: TextField(
-        controller: controller,
-        readOnly: true,
-        onTap: onTap,
-        decoration: InputDecoration(
-          hintText: label,
-          prefixIcon: Icon(Icons.calendar_today_rounded, color: primary),
-          filled: true,
-          fillColor: Colors.grey[50],
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
-            borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
-            borderSide: BorderSide(color: Colors.grey.withOpacity(0.2)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(24),
-            borderSide: BorderSide(color: primary, width: 1.2),
-          ),
-        ),
+  // ========================================
+  // HEADER MINIMALISTA E COMPACTO
+  // ========================================
+  Widget _buildHeaderCompacto() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: AppColors.borderLight, width: 1)),
       ),
-    );
-  }
-}
-
-class PedidoCard extends StatelessWidget {
-  final Pedido pedido;
-  final List<String> orderStatusOptions;
-  final String Function(String?) formatHorario;
-  final String Function(String?) formatDataAgendamento;
-  final Function(String) onStatusChanged;
-  final VoidCallback onTap;
-
-  const PedidoCard({
-    super.key,
-    required this.pedido,
-    required this.orderStatusOptions,
-    required this.formatHorario,
-    required this.formatDataAgendamento,
-    required this.onStatusChanged,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final primaryColor = const Color(0xFFF28C38);
-
-    Color statusBackground;
-    Color statusText;
-    switch ((pedido.status ?? '').toLowerCase()) {
-      case 'registrado':
-        statusBackground = const Color(0xFFE0F2FE);
-        statusText = const Color(0xFF0369A1);
-        break;
-      case 'saiu pra entrega':
-        statusBackground = const Color(0xFFFEF3C7);
-        statusText = const Color(0xFF92400E);
-        break;
-      case 'concluído':
-        statusBackground = const Color(0xFFDCFCE7);
-        statusText = const Color(0xFF166534);
-        break;
-      case 'cancelado':
-        statusBackground = const Color(0xFFfee2e2);
-        statusText = const Color(0xFF991B1B);
-        break;
-      case 'agendado':
-        statusBackground = const Color(0xFFE0F2FE);
-        statusText = const Color(0xFF0369A1);
-        break;
-      default:
-        statusBackground = Colors.grey[100]!;
-        statusText = Colors.grey[800]!;
-    }
-
-    Color deliveryBackground;
-    Color deliveryText;
-    IconData deliveryIcon;
-    switch ((pedido.tipoEntrega ?? '').toLowerCase()) {
-      case 'delivery':
-        deliveryBackground = const Color(0xFFDCFCE7);
-        deliveryText = const Color(0xFF166534);
-        deliveryIcon = Icons.local_shipping_rounded;
-        break;
-      case 'pickup':
-        deliveryBackground = const Color(0xFFDBEAFE);
-        deliveryText = const Color(0xFF1E40AF);
-        deliveryIcon = Icons.store_mall_directory_rounded;
-        break;
-      default:
-        deliveryBackground = const Color(0xFFE5E7EB);
-        deliveryText = const Color(0xFF4B5563);
-        deliveryIcon = Icons.help_outline_rounded;
-    }
-
-    final agendamentoDate = formatDataAgendamento(pedido.dataAgendamento?.isNotEmpty == true ? pedido.dataAgendamento : pedido.data);
-    final agendamentoHorario = pedido.horarioAgendamento ?? '';
-
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: agendamentoDate.startsWith('Data inválida') ? Colors.redAccent.withOpacity(0.5) : Colors.black12.withOpacity(0.06),
+      child: Row(
+        children: [
+          // ÍCONE + TÍTULO
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppColors.primaryOpacity12,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              border: Border.all(color: AppColors.primaryOpacity25),
+            ),
+            child: Icon(Icons.receipt_long_rounded, color: AppColors.primary, size: 24),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: primaryColor,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(color: primaryColor.withOpacity(0.25), blurRadius: 8, offset: const Offset(0, 3)),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        '#${pedido.id}',
-                        style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                      ),
-                      if (agendamentoDate.startsWith('Data inválida')) ...[
-                        const SizedBox(width: 8),
-                        const Icon(Icons.warning_rounded, color: Colors.white, size: 16),
-                      ],
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: deliveryBackground,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(deliveryIcon, size: 16, color: deliveryText),
-                      const SizedBox(width: 6),
-                      Text(
-                        pedido.tipoEntrega == 'delivery'
-                            ? 'Delivery'
-                            : pedido.tipoEntrega == 'pickup'
-                                ? 'Retirada'
-                                : 'Indefinido',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: deliveryText,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(pedido.nome ?? 'Sem nome', style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 2),
-            Text(pedido.bairro ?? 'Sem bairro', style: TextStyle(fontSize: 13.5, color: Colors.grey[700])),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.grey[300]!),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: pedido.status ?? 'Registrado',
-                      isDense: true,
-                      icon: Icon(Icons.arrow_drop_down_rounded, size: 20, color: primaryColor),
-                      dropdownColor: Colors.white,
-                      style: TextStyle(fontSize: 13.5, color: Colors.black87, fontWeight: FontWeight.w600),
-                      items: orderStatusOptions
-                          .map((s) => DropdownMenuItem<String>(
-                                value: s,
-                                child: Text(s, style: const TextStyle(fontSize: 13.5)),
-                              ))
-                          .toList(),
-                      onChanged: (newValue) {
-                        if (newValue != null && newValue != pedido.status) {
-                          onStatusChanged(newValue);
-                        }
-                      },
-                    ),
-                  ),
-                ),
-                const Spacer(),
+                Text('Gestão de Pedidos', style: AppTypography.sectionTitle),
+                const SizedBox(height: 2),
                 Row(
                   children: [
-                    Icon(
-                      agendamentoDate.startsWith('Data inválida') ? Icons.warning_rounded : Icons.calendar_today_rounded,
-                      size: 16,
-                      color: agendamentoDate.startsWith('Data inválida') ? Colors.redAccent : Colors.grey[700],
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      agendamentoDate,
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: agendamentoDate.startsWith('Data inválida') ? Colors.redAccent : Colors.grey[800],
-                        fontWeight: FontWeight.w600,
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: AppColors.success,
+                        shape: BoxShape.circle,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Icon(Icons.access_time_filled_rounded, size: 16, color: Colors.grey[700]),
                     const SizedBox(width: 6),
                     Text(
-                      agendamentoHorario,
-                      style: TextStyle(fontSize: 12.5, color: Colors.grey[800], fontWeight: FontWeight.w600),
+                      'Sistema online',
+                      style: AppTypography.caption.copyWith(color: AppColors.success),
                     ),
                   ],
                 ),
               ],
             ),
+          ),
+          // ESTATÍSTICAS RÁPIDAS
+          _buildStatsMini(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatsMini() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _buildQuery().snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const SizedBox.shrink();
+
+        final docs = snapshot.data!.docs;
+        final total = docs.length;
+        final pendentes = docs.where((d) {
+          final status = (d.data() as Map)['status'] ?? 'Processando';
+          return ['Pendente', 'Processando', 'Registrado'].contains(status);
+        }).length;
+        final concluidos = docs.where((d) {
+          final status = (d.data() as Map)['status'] ?? '';
+          return status == 'Concluído';
+        }).length;
+
+        return Row(
+          children: [
+            _buildStatMini('Total', total.toString(), AppColors.primary, Icons.shopping_cart_rounded),
+            const SizedBox(width: 12),
+            _buildStatMini('Pendentes', pendentes.toString(), AppColors.warning, Icons.pending_actions_rounded),
+            const SizedBox(width: 12),
+            _buildStatMini('Concluídos', concluidos.toString(), AppColors.success, Icons.check_circle_rounded),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildStatMini(String label, String value, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(value, style: AppTypography.label.copyWith(color: color, fontSize: 14)),
+              Text(label, style: AppTypography.caption.copyWith(fontSize: 10)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ========================================
+  // FILTROS COMPACTOS E HARMONIOSOS
+  // ========================================
+  Widget _buildFiltrosCompactos() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: AppColors.borderLight, width: 1)),
+      ),
+      child: Column(
+        children: [
+          // LINHA 1: BUSCA
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppColors.bgPrimary,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: AppColors.borderLight),
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    style: AppTypography.bodyMedium,
+                    decoration: InputDecoration(
+                      hintText: 'Buscar por ID, nome, bairro...',
+                      hintStyle: AppTypography.bodySmall.copyWith(color: AppColors.textTertiary),
+                      prefixIcon: Icon(Icons.search_rounded, color: AppColors.primary, size: 20),
+                      suffixIcon: _busca.isNotEmpty
+                          ? IconButton(
+                              icon: Icon(Icons.close_rounded, size: 18, color: AppColors.textSecondary),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _busca = '');
+                              },
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // LINHA 2: FILTROS
+          Row(
+            children: [
+              // CD
+              Expanded(
+                flex: 2,
+                child: _buildFilterButton(
+                  icon: Icons.warehouse_rounded,
+                  child: DropdownButton<String>(
+                    value: _cdFiltro,
+                    items: _cds.map((cd) => DropdownMenuItem(
+                      value: cd,
+                      child: Text(cd, style: AppTypography.bodySmall),
+                    )).toList(),
+                    onChanged: (v) => setState(() => _cdFiltro = v!),
+                    underline: const SizedBox.shrink(),
+                    isDense: true,
+                    icon: Icon(Icons.arrow_drop_down_rounded, color: AppColors.primary, size: 20),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // DATA INICIAL
+              Expanded(
+                flex: 2,
+                child: _buildFilterButton(
+                  icon: Icons.calendar_today_rounded,
+                  label: _dataInicial == null ? 'Data inicial' : DateFormat('dd/MM/yy').format(_dataInicial!),
+                  onTap: () => _selecionarData(true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // DATA FINAL
+              Expanded(
+                flex: 2,
+                child: _buildFilterButton(
+                  icon: Icons.event_rounded,
+                  label: _dataFinal == null ? 'Data final' : DateFormat('dd/MM/yy').format(_dataFinal!),
+                  onTap: () => _selecionarData(false),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // STATUS (MÚLTIPLA SELEÇÃO)
+              Expanded(
+                flex: 2,
+                child: _buildFilterButton(
+                  icon: Icons.filter_list_rounded,
+                  label: _statusFiltros.isEmpty 
+                      ? 'Todos os status' 
+                      : '${_statusFiltros.length} selecionado${_statusFiltros.length > 1 ? 's' : ''}',
+                  onTap: _abrirFiltroStatus,
+                ),
+              ),
+              const SizedBox(width: 8),
+              // LIMPAR FILTROS
+              if (_busca.isNotEmpty || _statusFiltros.isNotEmpty)
+                Container(
+                  height: 44,
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                    border: Border.all(color: AppColors.error.withOpacity(0.2)),
+                  ),
+                  child: IconButton(
+                    icon: Icon(Icons.clear_all_rounded, color: AppColors.error, size: 20),
+                    onPressed: () {
+                      setState(() {
+                        _searchController.clear();
+                        _busca = '';
+                        _statusFiltros.clear();
+                      });
+                    },
+                    tooltip: 'Limpar Filtros',
+                    padding: EdgeInsets.zero,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterButton({
+    required IconData icon,
+    String? label,
+    Widget? child,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: AppColors.bgPrimary,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppColors.borderLight),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: AppColors.primary, size: 18),
+            const SizedBox(width: 8),
+            if (label != null)
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTypography.bodySmall,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              )
+            else if (child != null)
+              Expanded(child: child),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ========================================
+  // MODAL DE FILTRO DE STATUS (CHECKBOXES)
+  // ========================================
+  void _abrirFiltroStatus() {
+    showDialog(
+      context: context,
+      builder: (context) => _FiltroStatusDialog(
+        statusSelecionados: Set.from(_statusFiltros),
+        onConfirmar: (selecionados) {
+          setState(() => _statusFiltros = selecionados);
+        },
+      ),
+    );
+  }
+
+  Future<void> _selecionarData(bool isInicial) async {
+    final date = await showDatePicker(
+      context: context,
+      initialDate: isInicial
+          ? (_dataInicial ?? DateTime.now())
+          : (_dataFinal ?? DateTime.now()),
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: AppColors.primary,
+              onPrimary: Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (date != null) {
+      setState(() {
+        if (isInicial) {
+          _dataInicial = DateTime(date.year, date.month, date.day);
+        } else {
+          _dataFinal = DateTime(date.year, date.month, date.day, 23, 59, 59);
+        }
+      });
+    }
+  }
+
+  // ========================================
+  // LISTA DE PEDIDOS COM STREAM
+  // ========================================
+  Widget _buildPedidosStream() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: _buildQuery().snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline_rounded, size: 48, color: AppColors.error),
+                const SizedBox(height: 16),
+                Text('Erro ao carregar pedidos', style: AppTypography.cardTitle),
+                const SizedBox(height: 8),
+                Text(snapshot.error.toString(), style: AppTypography.caption, textAlign: TextAlign.center),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: AppLoadingIndicator(size: 40));
+        }
+
+        final docs = snapshot.data!.docs;
+        final filtered = docs.where((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          final status = data['status'] == '-' ? 'Processando' : (data['status'] ?? 'Processando');
+          final cliente = data['cliente'] as Map<String, dynamic>?;
+          final endereco = data['endereco'] as Map<String, dynamic>?;
+          final id = data['id']?.toString() ?? '';
+          final nome = cliente?['nome']?.toString().toLowerCase() ?? '';
+          final bairro = endereco?['bairro']?.toString().toLowerCase() ?? '';
+
+          final matchesBusca = _busca.isEmpty || id.contains(_busca) || nome.contains(_busca) || bairro.contains(_busca);
+          final matchesStatus = _statusFiltros.isEmpty || _statusFiltros.contains(status);
+
+          return matchesBusca && matchesStatus;
+        }).toList();
+
+        if (filtered.isEmpty) {
+          return AppEmptyState(
+            icon: Icons.inbox_rounded,
+            title: 'Nenhum pedido encontrado',
+            message: _busca.isNotEmpty || _statusFiltros.isNotEmpty
+                ? 'Tente ajustar os filtros para encontrar o que procura'
+                : 'Ainda não há pedidos registrados para este período',
+          );
+        }
+
+        return ListView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.all(16),
+          itemCount: filtered.length,
+          itemBuilder: (context, i) => _buildPedidoCard(
+            filtered[i].data() as Map<String, dynamic>,
+            filtered[i].id,
+          ),
+        );
+      },
+    );
+  }
+
+  Query _buildQuery() {
+    Query query = FirebaseFirestore.instance
+        .collection('pedidos')
+        .where('is_ativo', isEqualTo: true);
+
+    if (_cdFiltro != 'Todos') {
+      query = query.where('cd', isEqualTo: _cdFiltro);
+    }
+
+    // FILTRO POR INTERVALO DE DATAS
+    if (_dataInicial != null && _dataFinal != null) {
+      query = query
+          .where('agendamento.data', isGreaterThanOrEqualTo: _dataInicial)
+          .where('agendamento.data', isLessThanOrEqualTo: _dataFinal);
+    } else if (_dataInicial != null) {
+      query = query.where('agendamento.data', isGreaterThanOrEqualTo: _dataInicial);
+    } else if (_dataFinal != null) {
+      query = query.where('agendamento.data', isLessThanOrEqualTo: _dataFinal);
+    }
+
+    query = query
+        .orderBy('agendamento.data', descending: true)
+        .orderBy('agendamento.janela_texto');
+
+    return query;
+  }
+
+  // ========================================
+  // CARD DE PEDIDO MINIMALISTA
+  // ========================================
+  Widget _buildPedidoCard(Map<String, dynamic> data, String id) {
+    final status = data['status'] == '-' ? 'Processando' : (data['status'] ?? 'Processando');
+    final color = _getStatusColor(status);
+
+    final cliente = data['cliente'] as Map<String, dynamic>?;
+    final endereco = data['endereco'] as Map<String, dynamic>?;
+    final pagamento = data['pagamento'] as Map<String, dynamic>?;
+    final agendamento = data['agendamento'] as Map<String, dynamic>?;
+
+    final slot = agendamento?['janela_texto'] ?? 'Sem slot';
+    final bairro = endereco?['bairro'] ?? 'Bairro não informado';
+    final entregador = data['entregador'] == '-' ? 'Sem entregador' : (data['entregador'] ?? 'Sem entregador');
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.borderLight),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          onTap: () => _abrirDetalhes(data, id),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // LINHA 1: ID + STATUS (COLORIDO E DESTACADO)
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '#$id',
+                        style: AppTypography.labelSmall.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    // BADGE COLORIDO E DESTACADO
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: color,
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: color.withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_getStatusIcon(status), size: 14, color: Colors.white),
+                          const SizedBox(width: 6),
+                          Text(
+                            status,
+                            style: AppTypography.labelSmall.copyWith(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                // LINHA 2: CLIENTE + CD
+                Row(
+                  children: [
+                    Icon(Icons.person_rounded, size: 16, color: AppColors.textSecondary),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        cliente?['nome'] ?? 'Cliente',
+                        style: AppTypography.bodyMedium.copyWith(fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryOpacity12,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        data['cd'] ?? 'CD',
+                        style: AppTypography.caption.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // LINHA 3: LOCALIZAÇÃO + ENTREGADOR
+                Row(
+                  children: [
+                    Icon(Icons.location_on_rounded, size: 14, color: AppColors.textTertiary),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(bairro, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
+                    ),
+                    const SizedBox(width: 12),
+                    Icon(Icons.motorcycle_rounded, size: 14, color: AppColors.textTertiary),
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(entregador, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
+                    ),
+                  ],
+                ),
+                const Divider(height: 16),
+                // LINHA 4: PAGAMENTO + HORÁRIO
+                Row(
+                  children: [
+                    Icon(_getPaymentIcon(pagamento?['metodo_principal']), size: 14, color: AppColors.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      pagamento?['metodo_principal'] ?? 'Pagamento',
+                      style: AppTypography.caption.copyWith(fontWeight: FontWeight.w500),
+                    ),
+                    const Spacer(),
+                    Icon(Icons.access_time_rounded, size: 14, color: AppColors.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      slot,
+                      style: AppTypography.caption.copyWith(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ========================================
+  // HELPERS
+  // ========================================
+  List<String> _getStatusList() {
+    return [
+      'Pendente',
+      'Processando',
+      'Registrado',
+      'Agendado',
+      'Saiu pra Entrega',
+      'Concluído',
+      'Cancelado',
+      'Publi',
+      'Retirado'
+    ];
+  }
+
+  Color _getStatusColor(String status) {
+    return switch (status) {
+      'Pendente' => AppColors.warning,
+      'Processando' => AppColors.info,
+      'Registrado' => const Color(0xFF9C27B0),
+      'Agendado' => const Color(0xFF3F51B5),
+      'Saiu pra Entrega' => AppColors.success,
+      'Concluído' => const Color(0xFF009688),
+      'Cancelado' => AppColors.error,
+      'Publi' => const Color(0xFF00BCD4),
+      'Retirado' => const Color(0xFF795548),
+      _ => AppColors.textSecondary,
+    };
+  }
+
+  IconData _getStatusIcon(String status) {
+    return switch (status) {
+      'Pendente' => Icons.hourglass_top_rounded,
+      'Processando' => Icons.autorenew_rounded,
+      'Registrado' => Icons.assignment_rounded,
+      'Agendado' => Icons.schedule_rounded,
+      'Saiu pra Entrega' => Icons.local_shipping_rounded,
+      'Concluído' => Icons.check_circle_rounded,
+      'Cancelado' => Icons.cancel_rounded,
+      'Publi' => Icons.public_rounded,
+      'Retirado' => Icons.store_rounded,
+      _ => Icons.help_rounded,
+    };
+  }
+
+  IconData _getPaymentIcon(String? metodo) {
+    return switch (metodo) {
+      'Pix' => Icons.qr_code_rounded,
+      'Cartão' => Icons.credit_card_rounded,
+      'Crédito Site' => Icons.web_rounded,
+      'V.A.' => Icons.local_atm_rounded,
+      _ => Icons.payment_rounded,
+    };
+  }
+
+  void _abrirDetalhes(Map<String, dynamic> data, String id) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _DetalhesPedido(
+        data: data,
+        pedidoId: id,
+        onAtualizado: () => setState(() {}),
+      ),
+    );
+  }
+}
+
+// ========================================
+// DIALOG DE FILTRO DE STATUS (CHECKBOXES)
+// ========================================
+class _FiltroStatusDialog extends StatefulWidget {
+  final Set<String> statusSelecionados;
+  final Function(Set<String>) onConfirmar;
+
+  const _FiltroStatusDialog({
+    required this.statusSelecionados,
+    required this.onConfirmar,
+  });
+
+  @override
+  State<_FiltroStatusDialog> createState() => _FiltroStatusDialogState();
+}
+
+class _FiltroStatusDialogState extends State<_FiltroStatusDialog> {
+  late Set<String> _selecionados;
+
+  final _todosStatus = [
+    'Pendente',
+    'Processando',
+    'Registrado',
+    'Agendado',
+    'Saiu pra Entrega',
+    'Concluído',
+    'Cancelado',
+    'Publi',
+    'Retirado'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _selecionados = Set.from(widget.statusSelecionados);
+  }
+
+  Color _getStatusColor(String status) {
+    return switch (status) {
+      'Pendente' => AppColors.warning,
+      'Processando' => AppColors.info,
+      'Registrado' => const Color(0xFF9C27B0),
+      'Agendado' => const Color(0xFF3F51B5),
+      'Saiu pra Entrega' => AppColors.success,
+      'Concluído' => const Color(0xFF009688),
+      'Cancelado' => AppColors.error,
+      'Publi' => const Color(0xFF00BCD4),
+      'Retirado' => const Color(0xFF795548),
+      _ => AppColors.textSecondary,
+    };
+  }
+
+  IconData _getStatusIcon(String status) {
+    return switch (status) {
+      'Pendente' => Icons.hourglass_top_rounded,
+      'Processando' => Icons.autorenew_rounded,
+      'Registrado' => Icons.assignment_rounded,
+      'Agendado' => Icons.schedule_rounded,
+      'Saiu pra Entrega' => Icons.local_shipping_rounded,
+      'Concluído' => Icons.check_circle_rounded,
+      'Cancelado' => Icons.cancel_rounded,
+      'Publi' => Icons.public_rounded,
+      'Retirado' => Icons.store_rounded,
+      _ => Icons.help_rounded,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryOpacity12,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.filter_list_rounded, color: AppColors.primary, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text('Filtrar por Status', style: AppTypography.cardTitle)),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Selecione um ou mais status para filtrar',
+              style: AppTypography.caption,
+            ),
+            const SizedBox(height: 16),
+            // BOTÕES: SELECIONAR TODOS / LIMPAR
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _selecionados = Set.from(_todosStatus)),
+                    icon: Icon(Icons.check_box_rounded, size: 18, color: AppColors.primary),
+                    label: Text('Selecionar Todos', style: AppTypography.bodySmall),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _selecionados.clear()),
+                    icon: Icon(Icons.clear_rounded, size: 18, color: AppColors.error),
+                    label: Text('Limpar', style: AppTypography.bodySmall),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(),
+            const SizedBox(height: 8),
+            // LISTA DE CHECKBOXES
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 400),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: _todosStatus.map((status) {
+                    final color = _getStatusColor(status);
+                    final icon = _getStatusIcon(status);
+                    final isSelected = _selecionados.contains(status);
+
+                    return InkWell(
+                      onTap: () {
+                        setState(() {
+                          if (isSelected) {
+                            _selecionados.remove(status);
+                          } else {
+                            _selecionados.add(status);
+                          }
+                        });
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isSelected ? color.withOpacity(0.08) : AppColors.bgPrimary,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected ? color.withOpacity(0.3) : AppColors.borderLight,
+                            width: isSelected ? 2 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: isSelected ? color : Colors.transparent,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isSelected ? color : AppColors.borderMedium,
+                                  width: 2,
+                                ),
+                              ),
+                              child: isSelected
+                                  ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
+                                  : null,
+                            ),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: color.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Icon(icon, size: 16, color: color),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                status,
+                                style: AppTypography.bodyMedium.copyWith(
+                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                  color: isSelected ? color : AppColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 16),
+            // RESUMO E AÇÕES
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.primaryOpacity8,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.primaryOpacity25),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 18, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${_selecionados.length} status selecionado${_selecionados.length != 1 ? 's' : ''}',
+                    style: AppTypography.bodySmall.copyWith(
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: 'Cancelar',
+                    variant: AppButtonVariant.outline,
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AppButton(
+                    label: 'Aplicar',
+                    onPressed: () {
+                      widget.onConfirmar(_selecionados);
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -1113,74 +954,737 @@ class PedidoCard extends StatelessWidget {
   }
 }
 
-extension on Pedido {
-  Pedido copyWith({String? status}) => Pedido(
-        id: id,
-        data: data,
-        horario: horario,
-        bairro: bairro,
-        nome: nome,
-        pagamento: pagamento,
-        subTotal: subTotal,
-        total: total,
-        vendedor: vendedor,
-        taxaEntrega: taxaEntrega,
-        status: status ?? this.status,
-        entregador: entregador,
-        rua: rua,
-        numero: numero,
-        cep: cep,
-        complemento: complemento,
-        latitude: latitude,
-        longitude: longitude,
-        unidade: unidade,
-        hifen: hifen,
-        cidade: cidade,
-        printedAt: printedAt,
-        tipoEntrega: tipoEntrega,
-        dataAgendamento: dataAgendamento,
-        horarioAgendamento: horarioAgendamento,
-        telefone: telefone,
-        observacao: observacao,
-        produtos: produtos,
-        rastreio: rastreio,
-        cupomNome: cupomNome,
-        cupomPercentual: cupomPercentual,
-        giftDesconto: giftDesconto,
-      );
+// ========================================
+// MODAL DE DETALHES DO PEDIDO
+// ========================================
+class _DetalhesPedido extends StatefulWidget {
+  final Map<String, dynamic> data;
+  final String pedidoId;
+  final VoidCallback onAtualizado;
 
-  Map<String, dynamic> toJson() => {
-        'id': id,
-        'data': data,
-        'horario': horario,
-        'bairro': bairro,
-        'nome': nome,
-        'pagamento': pagamento,
-        'subTotal': subTotal,
-        'total': total,
-        'vendedor': vendedor,
-        'taxa_entrega': taxaEntrega,
-        'status': status,
-        'entregador': entregador,
-        'rua': rua,
-        'numero': numero,
-        'cep': cep,
-        'complemento': complemento,
-        'latitude': latitude,
-        'longitude': longitude,
-        'unidade': unidade,
-        '-': hifen,
-        'cidade': cidade,
-        'printed_at': printedAt?.toIso8601String(),
-        'tipo_entrega': tipoEntrega,
-        'data_agendamento': dataAgendamento,
-        'horario_agendamento': horarioAgendamento,
-        'telefone': telefone,
-        'observacao': observacao,
-        'produtos': produtos,
-        'rastreio': rastreio,
-        'AG': cupomNome,
-        'AH': cupomPercentual,
-        'AI': giftDesconto,
-      };
+  const _DetalhesPedido({
+    required this.data,
+    required this.pedidoId,
+    required this.onAtualizado,
+  });
+
+  @override
+  State<_DetalhesPedido> createState() => _DetalhesPedidoState();
+}
+
+class _DetalhesPedidoState extends State<_DetalhesPedido> {
+  late List<Map<String, dynamic>> formas;
+  String? entregadorSelecionado;
+  late final double valorTotal;
+  late final double taxa;
+  List<String> _entregadores = [];
+  bool _loadingEntregadores = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final pagamento = widget.data['pagamento'] as Map<String, dynamic>?;
+    formas = (pagamento?['formas'] as List?)?.cast<Map<String, dynamic>>() ?? [
+      {
+        'tipo': pagamento?['metodo_principal'] ?? 'Cartão',
+        'valor': pagamento?['valor_total'] ?? 0.0
+      }
+    ];
+
+    valorTotal = (pagamento?['valor_total'] as num?)?.toDouble() ?? 0.0;
+    taxa = (pagamento?['taxa_entrega'] as num?)?.toDouble() ?? 0.0;
+    
+    final entregadorAtual = widget.data['entregador'];
+    entregadorSelecionado = (entregadorAtual == '-' || entregadorAtual == null) ? null : entregadorAtual;
+
+    _carregarEntregadores();
+     // Teste direto
+FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
+  debugPrint('🔥 Total docs: ${snapshot.docs.length}');
+  for (var doc in snapshot.docs) {
+    debugPrint('📄 Doc ID: ${doc.id}, Data: ${doc.data()}');
+  }
+}).catchError((e) {
+  debugPrint('❌ Erro: $e');
+});
+  }
+
+  
+
+  Future<void> _carregarEntregadores() async {
+  try {
+    final snapshot = await FirebaseFirestore.instance.collection('entregadores').get();
+    setState(() {
+      _entregadores = snapshot.docs.map((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        // Tenta diferentes variações do campo
+        return (data['nome'] ?? data['Nome'] ?? data['NOME'] ?? 'Sem nome') as String;
+      }).toList();
+      _loadingEntregadores = false;
+    });
+  } catch (e) {
+    debugPrint('Erro ao carregar entregadores: $e');
+    setState(() => _loadingEntregadores = false);
+  }
+}
+  @override
+  Widget build(BuildContext context) {
+    final status = widget.data['status'] == '-' ? 'Processando' : (widget.data['status'] ?? 'Processando');
+    final color = _getStatusColor(status);
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      maxChildSize: 0.95,
+      minChildSize: 0.5,
+      builder: (_, controller) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            const SizedBox(height: 12),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.borderMedium,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // HEADER
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: color.withOpacity(0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: color.withOpacity(0.3)),
+                    ),
+                    child: Icon(Icons.receipt_long_rounded, color: color, size: 24),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Pedido #${widget.data['id']}', style: AppTypography.cardTitle),
+                        const SizedBox(height: 6),
+                        // BADGE COLORIDO
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [
+                              BoxShadow(
+                                color: color.withOpacity(0.3),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(_getStatusIcon(status), size: 14, color: Colors.white),
+                              const SizedBox(width: 6),
+                              Text(
+                                status,
+                                style: AppTypography.labelSmall.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 24),
+            // CONTEÚDO
+            Expanded(
+              child: ListView(
+                controller: controller,
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                children: [
+                  _buildSection(
+                    title: 'Informações do Cliente',
+                    icon: Icons.person_rounded,
+                    children: [
+                      _infoRow(Icons.badge_rounded, 'Nome', widget.data['cliente']?['nome']),
+                      _infoRow(Icons.phone_rounded, 'Telefone', widget.data['cliente']?['telefone']),
+                      _infoRow(Icons.location_on_rounded, 'Bairro', widget.data['endereco']?['bairro']),
+                      _infoRow(Icons.home_rounded, 'Endereço', widget.data['endereco']?['logradouro']),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSection(
+                    title: 'Informações do Pedido',
+                    icon: Icons.shopping_bag_rounded,
+                    children: [
+                      _infoRow(Icons.warehouse_rounded, 'CD', widget.data['cd']),
+                      _buildEntregadorRow(),
+                      if (widget.data['agendamento']?['is_agendado'] == true)
+                        _infoRow(Icons.schedule_rounded, 'Agendamento', widget.data['agendamento']?['janela_texto']),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSection(
+                    title: 'Itens do Pedido',
+                    icon: Icons.list_alt_rounded,
+                    children: [
+                      ...(widget.data['itens'] as List).map((item) => Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                Icon(Icons.shopping_basket_rounded, size: 16, color: AppColors.primary),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(item['nome'], style: AppTypography.bodySmall),
+                                ),
+                                Text(
+                                  'Qtd: ${item['quantidade']}',
+                                  style: AppTypography.caption.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildPagamentoSection(valorTotal, taxa),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ========================================
+  // SELEÇÃO DE ENTREGADOR (DROPDOWN FUNCIONAL)
+  // ========================================
+  Widget _buildEntregadorRow() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.motorcycle_rounded, size: 18, color: AppColors.primary),
+          const SizedBox(width: 8),
+          Text('Entregador:', style: AppTypography.bodySmall.copyWith(fontWeight: FontWeight.w500)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _loadingEntregadores
+                ? Text('Carregando...', style: AppTypography.bodySmall)
+                : Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryOpacity8,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.primaryOpacity25),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String?>(
+                        value: entregadorSelecionado,
+                        isExpanded: true,
+                        isDense: true,
+                        hint: Text('Selecione um entregador', style: AppTypography.bodySmall),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Sem entregador'),
+                          ),
+                          ..._entregadores.map((nome) => DropdownMenuItem<String?>(
+                                value: nome,
+                                child: Text(nome, style: AppTypography.bodySmall),
+                              )),
+                        ],
+                        onChanged: (novoEntregador) async {
+                          setState(() => entregadorSelecionado = novoEntregador);
+
+                          // ATUALIZA NO FIRESTORE
+                          try {
+                            await FirebaseFirestore.instance
+                                .collection('pedidos')
+                                .doc(widget.pedidoId)
+                                .update({
+                              'entregador': novoEntregador ?? '-',
+                              'updated_at': FieldValue.serverTimestamp(),
+                            });
+
+                            widget.onAtualizado();
+
+                            if (mounted) {
+                              AppSnackbar.show(
+                                context,
+                                message: 'Entregador atualizado com sucesso!',
+                                type: AppSnackbarType.success,
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              AppSnackbar.show(
+                                context,
+                                message: 'Erro ao atualizar entregador: $e',
+                                type: AppSnackbarType.error,
+                              );
+                            }
+                          }
+                        },
+                        icon: Icon(Icons.arrow_drop_down_rounded, color: AppColors.primary, size: 20),
+                      ),
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSection({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.bgPrimary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderLight),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: AppColors.primary, size: 18),
+              const SizedBox(width: 8),
+              Text(title, style: AppTypography.label),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPagamentoSection(double valorTotal, double taxa) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.bgPrimary,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.borderLight),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.payment_rounded, color: AppColors.primary, size: 18),
+                  const SizedBox(width: 8),
+                  Text('Formas de Pagamento', style: AppTypography.label),
+                ],
+              ),
+              IconButton(
+                icon: Icon(Icons.edit_rounded, size: 18, color: AppColors.primary),
+                onPressed: _editarPagamentos,
+                tooltip: 'Editar Pagamento',
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...formas.map((f) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    Icon(_getIconForma(f['tipo']), size: 16, color: AppColors.primary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        f['tipo'],
+                        style: AppTypography.bodySmall.copyWith(fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                    Text(
+                      'R\$ ${(f['valor'] as num).toStringAsFixed(2)}',
+                      style: AppTypography.bodySmall.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+          const Divider(height: 20),
+          _infoRow(Icons.delivery_dining_rounded, 'Taxa de Entrega', 'R\$ ${taxa.toStringAsFixed(2)}'),
+          const SizedBox(height: 4),
+          _infoRow(
+            Icons.paid_rounded,
+            'TOTAL',
+            'R\$ ${valorTotal.toStringAsFixed(2)}',
+            isBold: true,
+            color: AppColors.success,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _editarPagamentos() {
+    showDialog(
+      context: context,
+      builder: (_) => _PagamentoDialog(
+        formasIniciais: List.from(formas),
+        valorTotal: valorTotal,
+        onSalvar: (novasFormas) async {
+          await FirebaseFirestore.instance.collection('pedidos').doc(widget.pedidoId).update({
+            'pagamento.formas': novasFormas,
+            'updated_at': FieldValue.serverTimestamp(),
+          });
+          setState(() => formas = novasFormas);
+          widget.onAtualizado();
+          Navigator.pop(context);
+          AppSnackbar.show(
+            context,
+            message: 'Pagamento atualizado com sucesso!',
+            type: AppSnackbarType.success,
+          );
+        },
+      ),
+    );
+  }
+
+  IconData _getIconForma(String tipo) {
+    return switch (tipo) {
+      'Cartão' => Icons.credit_card_rounded,
+      'Pix' => Icons.qr_code_rounded,
+      'Crédito Site' => Icons.web_rounded,
+      'V.A.' => Icons.local_atm_rounded,
+      _ => Icons.payment_rounded,
+    };
+  }
+
+  Widget _infoRow(IconData icon, String label, dynamic value, {bool isBold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color ?? AppColors.primary),
+          const SizedBox(width: 8),
+          Text(
+            '$label:',
+            style: AppTypography.bodySmall.copyWith(
+              fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              value?.toString() ?? 'N/A',
+              style: AppTypography.bodySmall.copyWith(
+                fontWeight: isBold ? FontWeight.w700 : FontWeight.w400,
+                color: color ?? AppColors.textPrimary,
+              ),
+              textAlign: TextAlign.end,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    return switch (status) {
+      'Pendente' => AppColors.warning,
+      'Processando' => AppColors.info,
+      'Registrado' => const Color(0xFF9C27B0),
+      'Agendado' => const Color(0xFF3F51B5),
+      'Saiu pra Entrega' => AppColors.success,
+      'Concluído' => const Color(0xFF009688),
+      'Cancelado' => AppColors.error,
+      'Publi' => const Color(0xFF00BCD4),
+      'Retirado' => const Color(0xFF795548),
+      _ => AppColors.textSecondary,
+    };
+  }
+
+  IconData _getStatusIcon(String status) {
+    return switch (status) {
+      'Pendente' => Icons.hourglass_top_rounded,
+      'Processando' => Icons.autorenew_rounded,
+      'Registrado' => Icons.assignment_rounded,
+      'Agendado' => Icons.schedule_rounded,
+      'Saiu pra Entrega' => Icons.local_shipping_rounded,
+      'Concluído' => Icons.check_circle_rounded,
+      'Cancelado' => Icons.cancel_rounded,
+      'Publi' => Icons.public_rounded,
+      'Retirado' => Icons.store_rounded,
+      _ => Icons.help_rounded,
+    };
+  }
+}
+
+// ========================================
+// DIALOG DE EDIÇÃO DE PAGAMENTO
+// ========================================
+class _PagamentoDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> formasIniciais;
+  final double valorTotal;
+  final Function(List<Map<String, dynamic>>) onSalvar;
+
+  const _PagamentoDialog({
+    required this.formasIniciais,
+    required this.valorTotal,
+    required this.onSalvar,
+  });
+
+  @override
+  State<_PagamentoDialog> createState() => _PagamentoDialogState();
+}
+
+class _PagamentoDialogState extends State<_PagamentoDialog> {
+  late List<Map<String, dynamic>> formas;
+  final List<TextEditingController> _controllers = [];
+
+  @override
+  void initState() {
+
+    super.initState();
+    formas = widget.formasIniciais.map((f) => Map<String, dynamic>.from(f)).toList();
+    
+    for (var forma in formas) {
+      final controller = TextEditingController(text: forma['valor'].toString());
+      controller.addListener(() {
+        final valor = double.tryParse(controller.text) ?? 0.0;
+        forma['valor'] = valor;
+        setState(() {});
+      });
+      _controllers.add(controller);
+    }
+  }
+
+  @override
+  void dispose() {
+    for (var controller in _controllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  double get totalPago => formas.fold(0.0, (sum, f) => sum + (f['valor'] as num).toDouble());
+  bool get isValid => (totalPago - widget.valorTotal).abs() < 0.01;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        width: 500,
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryOpacity12,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.edit_rounded, color: AppColors.primary, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: Text('Editar Pagamento', style: AppTypography.cardTitle)),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            ...formas.asMap().entries.map((entry) {
+              final i = entry.key;
+              final f = entry.value;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.bgPrimary,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.borderLight),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: AppColors.borderLight),
+                          ),
+                          child: DropdownButton<String>(
+                            value: f['tipo'],
+                            items: ['Cartão', 'Pix', 'Crédito Site', 'V.A.']
+                                .map((t) => DropdownMenuItem(
+                                      value: t,
+                                      child: Text(t, style: AppTypography.bodySmall),
+                                    ))
+                                .toList(),
+                            onChanged: (v) => setState(() => f['tipo'] = v),
+                            underline: const SizedBox.shrink(),
+                            isExpanded: true,
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        flex: 2,
+                        child: TextField(
+                          controller: _controllers[i],
+                          keyboardType: TextInputType.number,
+                          style: AppTypography.bodySmall,
+                          decoration: InputDecoration(
+                            prefixText: 'R\$ ',
+                            filled: true,
+                            fillColor: Colors.white,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: AppColors.borderLight),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          ),
+                        ),
+                      ),
+                      if (formas.length > 1)
+                        IconButton(
+                          icon: Icon(Icons.delete_rounded, color: AppColors.error, size: 20),
+                          onPressed: () {
+                            setState(() {
+                              _controllers[i].dispose();
+                              _controllers.removeAt(i);
+                              formas.removeAt(i);
+                            });
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+            AppButton(
+              label: 'Adicionar Forma de Pagamento',
+              icon: Icons.add_rounded,
+              variant: AppButtonVariant.outline,
+              fullWidth: true,
+              size: AppButtonSize.small,
+              onPressed: () {
+                setState(() {
+                  formas.add({'tipo': 'Pix', 'valor': 0.0});
+                  final controller = TextEditingController(text: '0.0');
+                  controller.addListener(() {
+                    final valor = double.tryParse(controller.text) ?? 0.0;
+                    formas.last['valor'] = valor;
+                    setState(() {});
+                  });
+                  _controllers.add(controller);
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+            const Divider(),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isValid ? AppColors.success.withOpacity(0.08) : AppColors.error.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: isValid ? AppColors.success.withOpacity(0.25) : AppColors.error.withOpacity(0.25),
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Total pago', style: AppTypography.caption),
+                      Text(
+                        'R\$ ${totalPago.toStringAsFixed(2)}',
+                        style: AppTypography.label.copyWith(
+                          color: isValid ? AppColors.success : AppColors.error,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Total esperado', style: AppTypography.caption),
+                      Text(
+                        'R\$ ${widget.valorTotal.toStringAsFixed(2)}',
+                        style: AppTypography.label,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: AppButton(
+                    label: 'Cancelar',
+                    variant: AppButtonVariant.outline,
+                    size: AppButtonSize.medium,
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AppButton(
+                    label: 'Salvar',
+                    size: AppButtonSize.medium,
+                    onPressed: isValid ? () => widget.onSalvar(formas) : null,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

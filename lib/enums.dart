@@ -3,7 +3,6 @@
 enum MenuItem {
   dashboard,
   pedidos,
-  novoPedido,
   pagamentos,
   criarLink, // Renomeado de novoPagamento
   verPagamentos,

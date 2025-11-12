@@ -1,21 +1,19 @@
 // lib/widgets/sidebar_menu.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../enums.dart';
+import '../provider/auth_provider.dart';
 
 class SidebarMenu extends StatefulWidget {
   final MenuItem selectedMenu;
   final Function(MenuItem) onMenuItemSelected;
-  final String? userName;
-  final String? userUnit;
   final VoidCallback? onLogout;
 
   const SidebarMenu({
     Key? key,
     required this.selectedMenu,
     required this.onMenuItemSelected,
-    this.userName,
-    this.userUnit,
     this.onLogout,
   }) : super(key: key);
 
@@ -25,56 +23,42 @@ class SidebarMenu extends StatefulWidget {
 
 class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStateMixin {
   bool _isCollapsed = false;
-  bool _isPagamentosExpanded = false;
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
+  late AnimationController _animCtrl;
+  late Animation<double> _fade;
+  late Animation<double> _scale;
 
   static const _logoUrl =
       'https://aogosto.com.br/delivery/wp-content/uploads/2025/03/go-laranja-maior-1.png';
+  static const _primary = Color(0xFFF28C38);
 
   @override
   void initState() {
     super.initState();
-    _animationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200),
+    _animCtrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 220));
+    _fade = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _animCtrl, curve: Curves.easeOut),
     );
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    _scale = Tween<double>(begin: 0.9, end: 1.0).animate(
+      CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutBack),
     );
-    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeOutCubic),
-    );
-    if (_isPagamentosExpanded) {
-      _animationController.forward();
-    }
+    _animCtrl.forward();
   }
 
   @override
   void dispose() {
-    _animationController.dispose();
+    _animCtrl.dispose();
     super.dispose();
   }
 
   @override
-  void didUpdateWidget(SidebarMenu oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (_isPagamentosExpanded) {
-      _animationController.forward();
-    } else {
-      _animationController.reverse();
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final double sidebarWidth = _isCollapsed ? 76 : 260;
-    final primary = const Color(0xFFF28C38);
+    final auth = Provider.of<AuthProvider>(context, listen: false);
+    final userName = auth.user?.nome ?? 'Usuário';
+    final double width = _isCollapsed ? 76 : 260;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
-      width: sidebarWidth,
+      width: width,
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [Colors.white, Colors.orange.shade50.withOpacity(0.55)],
@@ -83,184 +67,178 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
         ),
         border: Border(right: BorderSide(color: Colors.black.withOpacity(0.06))),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 14,
-            offset: const Offset(2, 0),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 14, offset: const Offset(2, 0)),
         ],
       ),
       child: Column(
         children: [
-          // ===== HEADER: LOGO + SAUDAÇÃO =====
-          Padding(
-            padding: EdgeInsets.symmetric(
-              horizontal: _isCollapsed ? 0 : 8,
-              vertical: 14,
-            ),
-            child: Column(
-              children: [
-                // LOGO
-                SizedBox(
-                  height: _isCollapsed ? 44 : 86,
-                  child: Image.network(
-                    _logoUrl,
-                    fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => Text(
-                      'GO',
-                      style: GoogleFonts.poppins(
-                        color: primary,
-                        fontSize: _isCollapsed ? 18 : 24,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // UNIDADE (apenas se não colapsado e tiver valor)
-                if (!_isCollapsed && widget.userUnit != null && widget.userUnit!.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text(
-                      'Unidade ${widget.userUnit}',
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                        letterSpacing: 0.3,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-
-                const SizedBox(height: 8),
-
-                // Linha divisória suave
-                Container(
-                  height: 1,
-                  margin: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [
-                        Colors.transparent,
-                        Colors.black.withOpacity(0.08),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
+          _buildHeader(userName),
           const SizedBox(height: 14),
-
-          // ===== ITENS DO MENU =====
           Expanded(
             child: SingleChildScrollView(
               child: Column(
                 children: [
-                  _item(
-                    icon: Icons.dashboard_rounded,
-                    label: 'Dashboard',
-                    menuItem: MenuItem.dashboard,
-                  ),
-                  _item(
-                    icon: Icons.list_alt_rounded,
-                    label: 'Pedidos',
-                    menuItem: MenuItem.pedidos,
-                  ),
-                  _item(
-                    icon: Icons.add_rounded,
-                    label: 'Novo Pedido',
-                    menuItem: MenuItem.novoPedido,
-                  ),
-                  _pagamentosItem(),
-                  _item(
-                    icon: Icons.motorcycle_rounded,
-                    label: 'Motoboys',
-                    menuItem: MenuItem.motoboys,
-                  ),
-                  _item(
-                    icon: Icons.update_rounded,
-                    label: 'Atualizações',
-                    menuItem: MenuItem.atualizacoes,
-                  ),
+                  _item(Icons.dashboard_rounded, 'Dashboard', MenuItem.dashboard),
+                  _item(Icons.list_alt_rounded, 'Pedidos', MenuItem.pedidos),
+                  _item(Icons.link_rounded, 'Criar Link', MenuItem.criarLink),
+                  _item(Icons.receipt_rounded, 'Ver Pagamentos', MenuItem.verPagamentos),
+                  _item(Icons.motorcycle_rounded, 'Motoboys', MenuItem.motoboys),
+                  _item(Icons.update_rounded, 'Atualizações', MenuItem.atualizacoes),
                 ],
               ),
             ),
           ),
-
-          // ===== RODAPÉ: COLAPSAR + SAIR =====
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                // Ícone de logout (sempre visível, mesmo colapsado)
-                if (widget.onLogout != null)
-                  InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: widget.onLogout,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.12),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.red.withOpacity(0.3)),
-                      ),
-                      child: Icon(
-                        Icons.logout,
-                        size: 18,
-                        color: Colors.red.shade700,
-                      ),
-                    ),
-                  )
-                else
-                  const SizedBox(width: 36),
-
-                // Texto "Sair" (apenas se expandido)
-                if (!_isCollapsed && widget.onLogout != null)
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 8),
-                      child: InkWell(
-                        onTap: widget.onLogout,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Text(
-                          'Sair',
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
-                            color: Colors.red.shade700,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                // Botão de colapsar (sempre à direita)
-                _collapseButton(primary),
-              ],
-            ),
-          ),
-
+          _buildFooter(),
           const SizedBox(height: 8),
         ],
       ),
     );
   }
 
-  // ===== ITEM DO MENU =====
-  Widget _item({
-    required IconData icon,
-    required String label,
-    required MenuItem menuItem,
-  }) {
+  // ========================================
+  // HEADER: LOGO CENTRALIZADA + USER
+  // ========================================
+  Widget _buildHeader(String userName) {
+    return FadeTransition(
+      opacity: _fade,
+      child: ScaleTransition(
+        scale: _scale,
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: _isCollapsed ? 0 : 8, vertical: 14),
+          child: Column(
+            children: [
+              // LOGO CENTRALIZADA (COMO ANTES)
+              SizedBox(
+                height: _isCollapsed ? 44 : 86,
+                child: Image.network(
+                  _logoUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => Text(
+                    'GO',
+                    style: GoogleFonts.poppins(
+                      color: _primary,
+                      fontSize: _isCollapsed ? 18 : 24,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 12),
+
+              // USER INFO (apenas quando expandido)
+              if (!_isCollapsed)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Row(
+                    children: [
+                      Stack(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _primary.withOpacity(0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.person_rounded, size: 20, color: _primary),
+                          ),
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Bem-vindo,',
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            Text(
+                              userName,
+                              style: GoogleFonts.poppins(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Center(
+                  child: Stack(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: BoxDecoration(
+                          color: _primary.withOpacity(0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.person_rounded, size: 18, color: _primary),
+                      ),
+                      Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: Colors.green,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 1.5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 8),
+
+              // DIVISOR
+              Container(
+                height: 1,
+                margin: const EdgeInsets.symmetric(horizontal: 8),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.transparent, Colors.black.withOpacity(0.08), Colors.transparent],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ========================================
+  // ITEM DO MENU (CLEAN + ELEGANTE)
+  // ========================================
+  Widget _item(IconData icon, String label, MenuItem menuItem) {
     final bool isSelected = widget.selectedMenu == menuItem;
-    final primary = const Color(0xFFF28C38);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -271,10 +249,11 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
           decoration: BoxDecoration(
-            color: isSelected ? primary.withOpacity(0.12) : Colors.transparent,
+            color: isSelected ? _primary.withOpacity(0.08) : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isSelected ? primary.withOpacity(0.35) : Colors.black12.withOpacity(0.06),
+              color: isSelected ? _primary.withOpacity(0.25) : Colors.transparent,
+              width: 1.2,
             ),
           ),
           child: Row(
@@ -282,10 +261,14 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isSelected ? primary : primary.withOpacity(0.15),
+                  color: isSelected ? _primary : _primary.withOpacity(0.12),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(icon, size: 18, color: isSelected ? Colors.white : primary),
+                child: Icon(
+                  icon,
+                  size: 18,
+                  color: isSelected ? Colors.white : _primary,
+                ),
               ),
               if (!_isCollapsed) ...[
                 const SizedBox(width: 12),
@@ -294,7 +277,7 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
                     label,
                     style: GoogleFonts.poppins(
                       fontWeight: FontWeight.w600,
-                      color: Colors.black87,
+                      color: isSelected ? _primary : Colors.black87,
                       fontSize: 15,
                     ),
                   ),
@@ -307,158 +290,62 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
     );
   }
 
-  // ===== ITEM EXPANSÍVEL: PAGAMENTOS =====
-  Widget _pagamentosItem() {
-    final bool isSelected = widget.selectedMenu == MenuItem.pagamentos ||
-        widget.selectedMenu == MenuItem.criarLink ||
-        widget.selectedMenu == MenuItem.verPagamentos;
-    final primary = const Color(0xFFF28C38);
-
+  // ========================================
+  // FOOTER: LOGOUT CLEAN + COLLAPSE
+  // ========================================
+  Widget _buildFooter() {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              setState(() {
-                _isPagamentosExpanded = !_isPagamentosExpanded;
-                if (_isPagamentosExpanded) {
-                  _animationController.forward();
-                } else {
-                  _animationController.reverse();
-                }
-              });
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-              decoration: BoxDecoration(
-                color: isSelected ? primary.withOpacity(0.12) : Colors.transparent,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isSelected ? primary.withOpacity(0.35) : Colors.black12.withOpacity(0.06),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isSelected ? primary : primary.withOpacity(0.15),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(Icons.link_rounded, size: 18, color: isSelected ? Colors.white : primary),
+          // === SAIR: ÍCONE + TEXTO (só expandido) ===
+          if (widget.onLogout != null)
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.withOpacity(0.08),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.grey.withOpacity(0.2), width: 1),
                   ),
-                  if (!_isCollapsed) ...[
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Pagamentos',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600,
-                          color: Colors.black87,
-                          fontSize: 15,
-                        ),
+                  child: Icon(
+                    Icons.logout,
+                    size: 17,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                if (!_isCollapsed) ...[
+                  const SizedBox(width: 10),
+                  InkWell(
+                    onTap: widget.onLogout,
+                    child: Text(
+                      'Sair',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
                       ),
                     ),
-                    Icon(
-                      _isPagamentosExpanded ? Icons.expand_less : Icons.expand_more,
-                      color: primary,
-                      size: 20,
-                    ),
-                  ],
+                  ),
                 ],
-              ),
-            ),
-          ),
-          if (_isPagamentosExpanded && !_isCollapsed)
-            FadeTransition(
-              opacity: _fadeAnimation,
-              child: ScaleTransition(
-                scale: _scaleAnimation,
-                child: Column(
-                  children: [
-                    _subItem(
-                      icon: Icons.payment_rounded,
-                      label: 'Criar Link Cartão/Pix',
-                      menuItem: MenuItem.criarLink,
-                    ),
-                    _subItem(
-                      icon: Icons.receipt_rounded,
-                      label: 'Ver Pagamentos',
-                      menuItem: MenuItem.verPagamentos,
-                    ),
-                  ],
-                ),
-              ),
-            ),
+              ],
+            )
+          else
+            const SizedBox(width: 36),
+
+          // === BOTÃO COLAPSAR (sempre à direita) ===
+          _collapseButton(),
         ],
       ),
     );
   }
 
-  // ===== SUBITEM =====
-  Widget _subItem({
-    required IconData icon,
-    required String label,
-    required MenuItem menuItem,
-  }) {
-    final bool isSelected = widget.selectedMenu == menuItem;
-    final primary = const Color(0xFFF28C38);
-
-    return Padding(
-      padding: const EdgeInsets.only(left: 24, top: 6, bottom: 6),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () => widget.onMenuItemSelected(menuItem),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-          decoration: BoxDecoration(
-            gradient: isSelected
-                ? LinearGradient(
-                    colors: [
-                      primary.withOpacity(0.08),
-                      primary.withOpacity(0.04),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  )
-                : null,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: isSelected ? primary.withOpacity(0.3) : Colors.transparent,
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                icon,
-                size: 16,
-                color: isSelected ? primary : Colors.grey[600],
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  label,
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w500,
-                    color: isSelected ? primary : Colors.black87,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ===== BOTÃO DE COLAPSAR =====
-  Widget _collapseButton(Color primary) {
+  // ========================================
+  // BOTÃO COLAPSAR
+  // ========================================
+  Widget _collapseButton() {
     return Tooltip(
       message: _isCollapsed ? 'Expandir' : 'Recolher',
       child: InkWell(
@@ -468,14 +355,14 @@ class _SidebarMenuState extends State<SidebarMenu> with SingleTickerProviderStat
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: primary.withOpacity(0.12),
+            color: _primary.withOpacity(0.12),
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: primary.withOpacity(0.35)),
+            border: Border.all(color: _primary.withOpacity(0.35)),
           ),
           child: Icon(
             _isCollapsed ? Icons.chevron_right_rounded : Icons.chevron_left_rounded,
             size: 22,
-            color: primary,
+            color: _primary,
           ),
         ),
       ),
