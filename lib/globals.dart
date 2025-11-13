@@ -13,7 +13,7 @@ class AppUser {
 }
 
 final Map<int, AppUser> appUsers = {
-  77: AppUser(id: 77, nome: 'Carlos Júnior'),
+  77: AppUser(id: 73, nome: 'Carlos Júnior'),
   99: AppUser(id: 99, nome: 'Kennedy'),
   100: AppUser(id: 100, nome: 'Caixa 1'),
 };

@@ -419,6 +419,21 @@ class _PedidosPageState extends State<PedidosPage> {
     );
   }
 
+  DateTime? _extrairHoraInicial(String slot) {
+  // Ex: "09:00 - 12:00" → pega "09:00"
+  final match = RegExp(r'(\d{2}:\d{2})').firstMatch(slot);
+  if (match == null) return null;
+
+  final hora = match.group(1)!;
+  try {
+    final hoje = DateTime.now();
+    final partes = hora.split(':');
+    return DateTime(hoje.year, hoje.month, hoje.day, int.parse(partes[0]), int.parse(partes[1]));
+  } catch (e) {
+    return null;
+  }
+}
+
   Future<void> _selecionarData(bool isInicial) async {
     final date = await showDatePicker(
       context: context,
@@ -447,84 +462,124 @@ class _PedidosPageState extends State<PedidosPage> {
   }
 
   Widget _buildPedidosStream() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _buildQuery().snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline_rounded, size: 48, color: AppColors.error),
-                const SizedBox(height: 16),
-                Text('Erro ao carregar pedidos', style: AppTypography.cardTitle),
-                const SizedBox(height: 8),
-                Text(snapshot.error.toString(), style: AppTypography.caption, textAlign: TextAlign.center),
-              ],
-            ),
-          );
-        }
-
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: AppLoadingIndicator(size: 40));
-        }
-
-        final docs = snapshot.data!.docs;
-        final filtered = docs.where((doc) {
-          final data = doc.data() as Map<String, dynamic>;
-          final status = data['status'] == '-' ? 'Processando' : (data['status'] ?? 'Processando');
-          final cliente = data['cliente'] as Map<String, dynamic>?;
-          final endereco = data['endereco'] as Map<String, dynamic>?;
-          final id = data['id']?.toString() ?? '';
-          final nome = cliente?['nome']?.toString().toLowerCase() ?? '';
-          final bairro = endereco?['bairro']?.toString().toLowerCase() ?? '';
-
-          final matchesBusca = _busca.isEmpty || id.contains(_busca) || nome.contains(_busca) || bairro.contains(_busca);
-          final matchesStatus = _statusFiltros.isEmpty || _statusFiltros.contains(status);
-
-          return matchesBusca && matchesStatus;
-        }).toList();
-
-        if (filtered.isEmpty) {
-          return AppEmptyState(
-            icon: Icons.inbox_rounded,
-            title: 'Nenhum pedido encontrado',
-            message: _busca.isNotEmpty || _statusFiltros.isNotEmpty
-                ? 'Tente ajustar os filtros para encontrar o que procura'
-                : 'Ainda não há pedidos registrados para este período',
-          );
-        }
-
-        return ListView.builder(
-          controller: _scrollController,
-          padding: const EdgeInsets.all(16),
-          itemCount: filtered.length,
-          itemBuilder: (context, i) => _buildPedidoCard(filtered[i].data() as Map<String, dynamic>, filtered[i].id),
+  return StreamBuilder<QuerySnapshot>(
+    stream: _buildQuery().snapshots(),
+    builder: (context, snapshot) {
+      if (snapshot.hasError) {
+        return Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline_rounded, size: 48, color: AppColors.error),
+              const SizedBox(height: 16),
+              Text('Erro ao carregar pedidos', style: AppTypography.cardTitle),
+              const SizedBox(height: 8),
+              Text(snapshot.error.toString(), style: AppTypography.caption, textAlign: TextAlign.center),
+            ],
+          ),
         );
-      },
-    );
-  }
+      }
+      if (snapshot.connectionState == ConnectionState.waiting) {
+        return const Center(child: AppLoadingIndicator(size: 40));
+      }
+
+      final docs = snapshot.data!.docs;
+      final filtered = docs.where((doc) {
+        final data = doc.data() as Map<String, dynamic>;
+        final status = data['status'] == '-' ? 'Processando' : (data['status'] ?? 'Processando');
+        final cliente = data['cliente'] as Map<String, dynamic>?;
+        final endereco = data['endereco'] as Map<String, dynamic>?;
+        final id = data['id']?.toString() ?? '';
+        final nome = cliente?['nome']?.toString().toLowerCase() ?? '';
+        final bairro = endereco?['bairro']?.toString().toLowerCase() ?? '';
+        final matchesBusca = _busca.isEmpty || id.contains(_busca) || nome.contains(_busca) || bairro.contains(_busca);
+        final matchesStatus = _statusFiltros.isEmpty || _statusFiltros.contains(status);
+        return matchesBusca && matchesStatus;
+      }).toList();
+
+      // === ORDENAÇÃO NO CLIENTE ===
+      filtered.sort((a, b) {
+        final dataA = a.data() as Map<String, dynamic>;
+        final dataB = b.data() as Map<String, dynamic>;
+
+        // 1. created_at (mais novo no topo)
+        final createdA = (dataA['created_at'] as Timestamp?)?.toDate() ?? DateTime(0);
+        final createdB = (dataB['created_at'] as Timestamp?)?.toDate() ?? DateTime(0);
+        final compareCreated = createdB.compareTo(createdA);
+        if (compareCreated != 0) return compareCreated;
+
+        // 2. slot de agendamento
+        final slotA = (dataA['agendamento']?['janela_texto'] ?? '').toString();
+        final slotB = (dataB['agendamento']?['janela_texto'] ?? '').toString();
+        final horaA = _extrairHoraInicial(slotA);
+        final horaB = _extrairHoraInicial(slotB);
+
+        if (horaA == null && horaB == null) return 0;
+        if (horaA == null) return 1;
+        if (horaB == null) return -1;
+        return horaA.compareTo(horaB);
+      });
+
+      // === ESTADO VAZIO ===
+      if (filtered.isEmpty) {
+        return AppEmptyState(
+          icon: Icons.inbox_rounded,
+          title: 'Nenhum pedido encontrado',
+          message: _busca.isNotEmpty || _statusFiltros.isNotEmpty
+              ? 'Tente ajustar os filtros para encontrar o que procura'
+              : 'Ainda não há pedidos registrados para este período',
+        );
+      }
+
+      // === LISTA DE PEDIDOS ===
+      return ListView.builder(
+        controller: _scrollController,
+        padding: const EdgeInsets.all(16),
+        itemCount: filtered.length,
+        itemBuilder: (context, i) => _buildPedidoCard(
+          filtered[i].data() as Map<String, dynamic>,
+          filtered[i].id,
+        ),
+      );
+    },
+  );
+}
 
   Query _buildQuery() {
-    Query query = FirebaseFirestore.instance.collection('pedidos').where('is_ativo', isEqualTo: true);
+  Query query = FirebaseFirestore.instance
+      .collection('pedidos')
+      .where('is_ativo', isEqualTo: true);
 
-    if (_cdFiltro != 'Todos') {
-      query = query.where('cd', isEqualTo: _cdFiltro);
-    }
+  // === FILTRO DE CD (com tratamento de cd vazio) ===
+  if (_cdFiltro == 'Todos') {
+    // sem filtro
+  } else if (_cdFiltro == 'CD Central') {
+    query = query.where('cd', whereIn: ['CD Central', '']);
+  } else {
+    query = query.where('cd', isEqualTo: _cdFiltro);
+  }
 
-    if (_dataInicial != null && _dataFinal != null) {
-      query = query
-          .where('agendamento.data', isGreaterThanOrEqualTo: _dataInicial)
-          .where('agendamento.data', isLessThanOrEqualTo: _dataFinal);
-    } else if (_dataInicial != null) {
+  // === FILTRO DE DATA (agendamento) ===
+  if (_dataInicial != null || _dataFinal != null) {
+    query = query.orderBy('agendamento.data', descending: true);
+    if (_dataInicial != null) {
       query = query.where('agendamento.data', isGreaterThanOrEqualTo: _dataInicial);
-    } else if (_dataFinal != null) {
+    }
+    if (_dataFinal != null) {
       query = query.where('agendamento.data', isLessThanOrEqualTo: _dataFinal);
     }
-
-    query = query.orderBy('agendamento.data', descending: true).orderBy('agendamento.janela_texto');
-    return query;
   }
+
+  // === ORDENAÇÃO PRINCIPAL: created_at (desc) ===
+  query = query.orderBy('created_at', descending: true);
+
+  // === ORDENAÇÃO SECUNDÁRIA: slot de agendamento (cronológico) ===
+  // Vamos ordenar por hora inicial do slot (ex: "09:00")
+  // Mas como é string, vamos extrair no cliente
+  // → Não dá pra ordenar por substring no Firestore
+
+  return query;
+}
 
   // CARD COM BADGE DE TIPO DE ENTREGA
   Widget _buildPedidoCard(Map<String, dynamic> data, String id) {
