@@ -2,7 +2,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../design_system.dart';
+
+// URL DO GOOGLE APPS SCRIPT (substitua pela sua URL de deploy)
+const String GOOGLE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwZuFyCgoLU_oTUc98ayUDFnR4aGwIYTzDGWOoJT99elnUdN6sp1s_tm5r7gaQol1lb/exec';
 
 class PedidosPage extends StatefulWidget {
   const PedidosPage({Key? key}) : super(key: key);
@@ -14,12 +19,11 @@ class _PedidosPageState extends State<PedidosPage> {
   final _scrollController = ScrollController();
   final _searchController = TextEditingController();
 
-  // FILTROS
   String _cdFiltro = 'CD Central';
   DateTime? _dataInicial;
   DateTime? _dataFinal;
   String _busca = '';
-  Set<String> _statusFiltros = {}; // Múltiplos status selecionados
+  Set<String> _statusFiltros = {};
 
   final _cds = ['CD Central', 'CD Sion', 'CD Barreiro', 'CD Lagoa Santa', 'Todos'];
 
@@ -27,7 +31,6 @@ class _PedidosPageState extends State<PedidosPage> {
   void initState() {
     super.initState();
     _searchController.addListener(() => setState(() => _busca = _searchController.text.toLowerCase()));
-    // Define data inicial e final como hoje por padrão
     final hoje = DateTime.now();
     _dataInicial = DateTime(hoje.year, hoje.month, hoje.day);
     _dataFinal = DateTime(hoje.year, hoje.month, hoje.day, 23, 59, 59);
@@ -54,9 +57,6 @@ class _PedidosPageState extends State<PedidosPage> {
     );
   }
 
-  // ========================================
-  // HEADER MINIMALISTA E COMPACTO
-  // ========================================
   Widget _buildHeaderCompacto() {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
@@ -66,7 +66,6 @@ class _PedidosPageState extends State<PedidosPage> {
       ),
       child: Row(
         children: [
-          // ÍCONE + TÍTULO
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
@@ -103,7 +102,6 @@ class _PedidosPageState extends State<PedidosPage> {
               ],
             ),
           ),
-          // ESTATÍSTICAS RÁPIDAS
           _buildStatsMini(),
         ],
       ),
@@ -118,9 +116,9 @@ class _PedidosPageState extends State<PedidosPage> {
 
         final docs = snapshot.data!.docs;
         final total = docs.length;
-        final pendentes = docs.where((d) {
-          final status = (d.data() as Map)['status'] ?? 'Processando';
-          return ['Pendente', 'Processando', 'Registrado'].contains(status);
+        final saiuEntrega = docs.where((d) {
+          final status = (d.data() as Map)['status'] ?? '';
+          return status == 'Saiu pra Entrega';
         }).length;
         final concluidos = docs.where((d) {
           final status = (d.data() as Map)['status'] ?? '';
@@ -131,9 +129,9 @@ class _PedidosPageState extends State<PedidosPage> {
           children: [
             _buildStatMini('Total', total.toString(), AppColors.primary, Icons.shopping_cart_rounded),
             const SizedBox(width: 12),
-            _buildStatMini('Pendentes', pendentes.toString(), AppColors.warning, Icons.pending_actions_rounded),
+            _buildStatMini('Saiu pra Entrega', saiuEntrega.toString(), const Color(0xFF4CAF50), Icons.local_shipping_rounded),
             const SizedBox(width: 12),
-            _buildStatMini('Concluídos', concluidos.toString(), AppColors.success, Icons.check_circle_rounded),
+            _buildStatMini('Concluídos', concluidos.toString(), const Color(0xFF009688), Icons.check_circle_rounded),
           ],
         );
       },
@@ -165,9 +163,6 @@ class _PedidosPageState extends State<PedidosPage> {
     );
   }
 
-  // ========================================
-  // FILTROS COMPACTOS E HARMONIOSOS
-  // ========================================
   Widget _buildFiltrosCompactos() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -177,7 +172,6 @@ class _PedidosPageState extends State<PedidosPage> {
       ),
       child: Column(
         children: [
-          // LINHA 1: BUSCA
           Row(
             children: [
               Expanded(
@@ -213,10 +207,8 @@ class _PedidosPageState extends State<PedidosPage> {
             ],
           ),
           const SizedBox(height: 12),
-          // LINHA 2: FILTROS
           Row(
             children: [
-              // CD
               Expanded(
                 flex: 2,
                 child: _buildFilterButton(
@@ -235,7 +227,6 @@ class _PedidosPageState extends State<PedidosPage> {
                 ),
               ),
               const SizedBox(width: 8),
-              // DATA INICIAL
               Expanded(
                 flex: 2,
                 child: _buildFilterButton(
@@ -245,7 +236,6 @@ class _PedidosPageState extends State<PedidosPage> {
                 ),
               ),
               const SizedBox(width: 8),
-              // DATA FINAL
               Expanded(
                 flex: 2,
                 child: _buildFilterButton(
@@ -255,19 +245,11 @@ class _PedidosPageState extends State<PedidosPage> {
                 ),
               ),
               const SizedBox(width: 8),
-              // STATUS (MÚLTIPLA SELEÇÃO)
               Expanded(
                 flex: 2,
-                child: _buildFilterButton(
-                  icon: Icons.filter_list_rounded,
-                  label: _statusFiltros.isEmpty 
-                      ? 'Todos os status' 
-                      : '${_statusFiltros.length} selecionado${_statusFiltros.length > 1 ? 's' : ''}',
-                  onTap: _abrirFiltroStatus,
-                ),
+                child: _buildStatusDropdown(),
               ),
               const SizedBox(width: 8),
-              // LIMPAR FILTROS
               if (_busca.isNotEmpty || _statusFiltros.isNotEmpty)
                 Container(
                   height: 44,
@@ -297,6 +279,114 @@ class _PedidosPageState extends State<PedidosPage> {
     );
   }
 
+  Widget _buildStatusDropdown() {
+    final _todosStatus = [
+      'Pendente',
+      'Processando',
+      'Registrado',
+      'Agendado',
+      'Saiu pra Entrega',
+      'Concluído',
+      'Cancelado',
+      'Publi',
+      'Retirado'
+    ];
+
+    return PopupMenuButton<String>(
+      child: Container(
+        height: 44,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: AppColors.bgPrimary,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(color: AppColors.borderLight),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.filter_list_rounded, color: AppColors.primary, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _statusFiltros.isEmpty 
+                    ? 'Todos os status' 
+                    : '${_statusFiltros.length} selecionado${_statusFiltros.length > 1 ? 's' : ''}',
+                style: AppTypography.bodySmall,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            Icon(Icons.arrow_drop_down_rounded, color: AppColors.primary, size: 20),
+          ],
+        ),
+      ),
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          enabled: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Filtrar por Status', style: AppTypography.label),
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _statusFiltros.clear());
+                      Navigator.pop(context);
+                    },
+                    child: Text('Limpar', style: AppTypography.bodySmall.copyWith(color: AppColors.error)),
+                  ),
+                ],
+              ),
+              const Divider(height: 8),
+            ],
+          ),
+        ),
+        ..._todosStatus.map((status) {
+          final isSelected = _statusFiltros.contains(status);
+          final color = _getStatusColor(status);
+          
+          return PopupMenuItem<String>(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: StatefulBuilder(
+              builder: (context, setStateMenu) {
+                return InkWell(
+                  onTap: () {
+                    setState(() {
+                      if (_statusFiltros.contains(status)) {
+                        _statusFiltros.remove(status);
+                      } else {
+                        _statusFiltros.add(status);
+                      }
+                    });
+                    setStateMenu(() {});
+                  },
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: isSelected ? color : Colors.transparent,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: isSelected ? color : AppColors.borderMedium, width: 2),
+                        ),
+                        child: isSelected ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(_getStatusIcon(status), size: 16, color: color),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(status, style: AppTypography.bodySmall)),
+                    ],
+                  ),
+                );
+              },
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
   Widget _buildFilterButton({
     required IconData icon,
     String? label,
@@ -319,11 +409,7 @@ class _PedidosPageState extends State<PedidosPage> {
             const SizedBox(width: 8),
             if (label != null)
               Expanded(
-                child: Text(
-                  label,
-                  style: AppTypography.bodySmall,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: Text(label, style: AppTypography.bodySmall, overflow: TextOverflow.ellipsis),
               )
             else if (child != null)
               Expanded(child: child),
@@ -333,36 +419,16 @@ class _PedidosPageState extends State<PedidosPage> {
     );
   }
 
-  // ========================================
-  // MODAL DE FILTRO DE STATUS (CHECKBOXES)
-  // ========================================
-  void _abrirFiltroStatus() {
-    showDialog(
-      context: context,
-      builder: (context) => _FiltroStatusDialog(
-        statusSelecionados: Set.from(_statusFiltros),
-        onConfirmar: (selecionados) {
-          setState(() => _statusFiltros = selecionados);
-        },
-      ),
-    );
-  }
-
   Future<void> _selecionarData(bool isInicial) async {
     final date = await showDatePicker(
       context: context,
-      initialDate: isInicial
-          ? (_dataInicial ?? DateTime.now())
-          : (_dataFinal ?? DateTime.now()),
+      initialDate: isInicial ? (_dataInicial ?? DateTime.now()) : (_dataFinal ?? DateTime.now()),
       firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 365)),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: AppColors.primary,
-              onPrimary: Colors.white,
-            ),
+            colorScheme: ColorScheme.light(primary: AppColors.primary, onPrimary: Colors.white),
           ),
           child: child!,
         );
@@ -380,9 +446,6 @@ class _PedidosPageState extends State<PedidosPage> {
     }
   }
 
-  // ========================================
-  // LISTA DE PEDIDOS COM STREAM
-  // ========================================
   Widget _buildPedidosStream() {
     return StreamBuilder<QuerySnapshot>(
       stream: _buildQuery().snapshots(),
@@ -436,25 +499,19 @@ class _PedidosPageState extends State<PedidosPage> {
           controller: _scrollController,
           padding: const EdgeInsets.all(16),
           itemCount: filtered.length,
-          itemBuilder: (context, i) => _buildPedidoCard(
-            filtered[i].data() as Map<String, dynamic>,
-            filtered[i].id,
-          ),
+          itemBuilder: (context, i) => _buildPedidoCard(filtered[i].data() as Map<String, dynamic>, filtered[i].id),
         );
       },
     );
   }
 
   Query _buildQuery() {
-    Query query = FirebaseFirestore.instance
-        .collection('pedidos')
-        .where('is_ativo', isEqualTo: true);
+    Query query = FirebaseFirestore.instance.collection('pedidos').where('is_ativo', isEqualTo: true);
 
     if (_cdFiltro != 'Todos') {
       query = query.where('cd', isEqualTo: _cdFiltro);
     }
 
-    // FILTRO POR INTERVALO DE DATAS
     if (_dataInicial != null && _dataFinal != null) {
       query = query
           .where('agendamento.data', isGreaterThanOrEqualTo: _dataInicial)
@@ -465,19 +522,15 @@ class _PedidosPageState extends State<PedidosPage> {
       query = query.where('agendamento.data', isLessThanOrEqualTo: _dataFinal);
     }
 
-    query = query
-        .orderBy('agendamento.data', descending: true)
-        .orderBy('agendamento.janela_texto');
-
+    query = query.orderBy('agendamento.data', descending: true).orderBy('agendamento.janela_texto');
     return query;
   }
 
-  // ========================================
-  // CARD DE PEDIDO MINIMALISTA
-  // ========================================
+  // CARD COM BADGE DE TIPO DE ENTREGA
   Widget _buildPedidoCard(Map<String, dynamic> data, String id) {
     final status = data['status'] == '-' ? 'Processando' : (data['status'] ?? 'Processando');
     final color = _getStatusColor(status);
+    final tipoEntrega = data['tipo_entrega']?.toString() ?? 'delivery';
 
     final cliente = data['cliente'] as Map<String, dynamic>?;
     final endereco = data['endereco'] as Map<String, dynamic>?;
@@ -501,15 +554,14 @@ class _PedidosPageState extends State<PedidosPage> {
           borderRadius: BorderRadius.circular(AppRadius.md),
           onTap: () => _abrirDetalhes(data, id),
           child: Padding(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // LINHA 1: ID + STATUS (COLORIDO E DESTACADO)
                 Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
                         color: AppColors.primary,
                         borderRadius: BorderRadius.circular(6),
@@ -522,8 +574,42 @@ class _PedidosPageState extends State<PedidosPage> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    // BADGE DE TIPO DE ENTREGA
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: tipoEntrega == 'delivery' 
+                            ? const Color(0xFF2196F3).withOpacity(0.15)
+                            : const Color(0xFFFF9800).withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: tipoEntrega == 'delivery' 
+                              ? const Color(0xFF2196F3).withOpacity(0.3)
+                              : const Color(0xFFFF9800).withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            tipoEntrega == 'delivery' ? Icons.delivery_dining_rounded : Icons.store_rounded,
+                            size: 14,
+                            color: tipoEntrega == 'delivery' ? const Color(0xFF2196F3) : const Color(0xFFFF9800),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            tipoEntrega == 'delivery' ? 'Entrega' : 'Retirada',
+                            style: AppTypography.labelSmall.copyWith(
+                              color: tipoEntrega == 'delivery' ? const Color(0xFF2196F3) : const Color(0xFFFF9800),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     const Spacer(),
-                    // BADGE COLORIDO E DESTACADO
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
@@ -540,7 +626,7 @@ class _PedidosPageState extends State<PedidosPage> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(_getStatusIcon(status), size: 14, color: Colors.white),
+                          Icon(_getStatusIcon(status), size: 13, color: Colors.white),
                           const SizedBox(width: 6),
                           Text(
                             status,
@@ -554,11 +640,10 @@ class _PedidosPageState extends State<PedidosPage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 10),
-                // LINHA 2: CLIENTE + CD
+                const SizedBox(height: 12),
                 Row(
                   children: [
-                    Icon(Icons.person_rounded, size: 16, color: AppColors.textSecondary),
+                    Icon(Icons.person_rounded, size: 16, color: AppColors.primary),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -567,11 +652,13 @@ class _PedidosPageState extends State<PedidosPage> {
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: AppColors.primaryOpacity12,
                         borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: AppColors.primaryOpacity25),
                       ),
                       child: Text(
                         data['cd'] ?? 'CD',
@@ -584,41 +671,70 @@ class _PedidosPageState extends State<PedidosPage> {
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                // LINHA 3: LOCALIZAÇÃO + ENTREGADOR
+                const SizedBox(height: 10),
                 Row(
                   children: [
-                    Icon(Icons.location_on_rounded, size: 14, color: AppColors.textTertiary),
-                    const SizedBox(width: 4),
                     Expanded(
-                      child: Text(bairro, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
+                      child: Row(
+                        children: [
+                          Icon(Icons.location_on_rounded, size: 14, color: AppColors.textSecondary),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(bairro, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 12),
-                    Icon(Icons.motorcycle_rounded, size: 14, color: AppColors.textTertiary),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(entregador, style: AppTypography.caption, overflow: TextOverflow.ellipsis),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.access_time_rounded, size: 14, color: AppColors.textSecondary),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              slot,
+                              style: AppTypography.caption.copyWith(fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                const Divider(height: 16),
-                // LINHA 4: PAGAMENTO + HORÁRIO
+                const SizedBox(height: 8),
                 Row(
                   children: [
-                    Icon(_getPaymentIcon(pagamento?['metodo_principal']), size: 14, color: AppColors.primary),
-                    const SizedBox(width: 6),
-                    Text(
-                      pagamento?['metodo_principal'] ?? 'Pagamento',
-                      style: AppTypography.caption.copyWith(fontWeight: FontWeight.w500),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(_getPaymentIcon(pagamento?['metodo_principal']), size: 14, color: AppColors.textSecondary),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              pagamento?['metodo_principal'] ?? 'Pagamento',
+                              style: AppTypography.caption,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const Spacer(),
-                    Icon(Icons.access_time_rounded, size: 14, color: AppColors.primary),
-                    const SizedBox(width: 6),
-                    Text(
-                      slot,
-                      style: AppTypography.caption.copyWith(
-                        color: AppColors.primary,
-                        fontWeight: FontWeight.w600,
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Icon(Icons.motorcycle_rounded, size: 14, color: AppColors.textSecondary),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              entregador,
+                              style: AppTypography.caption.copyWith(fontWeight: FontWeight.w500),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -629,23 +745,6 @@ class _PedidosPageState extends State<PedidosPage> {
         ),
       ),
     );
-  }
-
-  // ========================================
-  // HELPERS
-  // ========================================
-  List<String> _getStatusList() {
-    return [
-      'Pendente',
-      'Processando',
-      'Registrado',
-      'Agendado',
-      'Saiu pra Entrega',
-      'Concluído',
-      'Cancelado',
-      'Publi',
-      'Retirado'
-    ];
   }
 
   Color _getStatusColor(String status) {
@@ -703,258 +802,6 @@ class _PedidosPageState extends State<PedidosPage> {
 }
 
 // ========================================
-// DIALOG DE FILTRO DE STATUS (CHECKBOXES)
-// ========================================
-class _FiltroStatusDialog extends StatefulWidget {
-  final Set<String> statusSelecionados;
-  final Function(Set<String>) onConfirmar;
-
-  const _FiltroStatusDialog({
-    required this.statusSelecionados,
-    required this.onConfirmar,
-  });
-
-  @override
-  State<_FiltroStatusDialog> createState() => _FiltroStatusDialogState();
-}
-
-class _FiltroStatusDialogState extends State<_FiltroStatusDialog> {
-  late Set<String> _selecionados;
-
-  final _todosStatus = [
-    'Pendente',
-    'Processando',
-    'Registrado',
-    'Agendado',
-    'Saiu pra Entrega',
-    'Concluído',
-    'Cancelado',
-    'Publi',
-    'Retirado'
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _selecionados = Set.from(widget.statusSelecionados);
-  }
-
-  Color _getStatusColor(String status) {
-    return switch (status) {
-      'Pendente' => AppColors.warning,
-      'Processando' => AppColors.info,
-      'Registrado' => const Color(0xFF9C27B0),
-      'Agendado' => const Color(0xFF3F51B5),
-      'Saiu pra Entrega' => AppColors.success,
-      'Concluído' => const Color(0xFF009688),
-      'Cancelado' => AppColors.error,
-      'Publi' => const Color(0xFF00BCD4),
-      'Retirado' => const Color(0xFF795548),
-      _ => AppColors.textSecondary,
-    };
-  }
-
-  IconData _getStatusIcon(String status) {
-    return switch (status) {
-      'Pendente' => Icons.hourglass_top_rounded,
-      'Processando' => Icons.autorenew_rounded,
-      'Registrado' => Icons.assignment_rounded,
-      'Agendado' => Icons.schedule_rounded,
-      'Saiu pra Entrega' => Icons.local_shipping_rounded,
-      'Concluído' => Icons.check_circle_rounded,
-      'Cancelado' => Icons.cancel_rounded,
-      'Publi' => Icons.public_rounded,
-      'Retirado' => Icons.store_rounded,
-      _ => Icons.help_rounded,
-    };
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: 400,
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryOpacity12,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(Icons.filter_list_rounded, color: AppColors.primary, size: 20),
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: Text('Filtrar por Status', style: AppTypography.cardTitle)),
-                IconButton(
-                  icon: const Icon(Icons.close_rounded),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Selecione um ou mais status para filtrar',
-              style: AppTypography.caption,
-            ),
-            const SizedBox(height: 16),
-            // BOTÕES: SELECIONAR TODOS / LIMPAR
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: () => setState(() => _selecionados = Set.from(_todosStatus)),
-                    icon: Icon(Icons.check_box_rounded, size: 18, color: AppColors.primary),
-                    label: Text('Selecionar Todos', style: AppTypography.bodySmall),
-                  ),
-                ),
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: () => setState(() => _selecionados.clear()),
-                    icon: Icon(Icons.clear_rounded, size: 18, color: AppColors.error),
-                    label: Text('Limpar', style: AppTypography.bodySmall),
-                  ),
-                ),
-              ],
-            ),
-            const Divider(),
-            const SizedBox(height: 8),
-            // LISTA DE CHECKBOXES
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 400),
-              child: SingleChildScrollView(
-                child: Column(
-                  children: _todosStatus.map((status) {
-                    final color = _getStatusColor(status);
-                    final icon = _getStatusIcon(status);
-                    final isSelected = _selecionados.contains(status);
-
-                    return InkWell(
-                      onTap: () {
-                        setState(() {
-                          if (isSelected) {
-                            _selecionados.remove(status);
-                          } else {
-                            _selecionados.add(status);
-                          }
-                        });
-                      },
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: isSelected ? color.withOpacity(0.08) : AppColors.bgPrimary,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: isSelected ? color.withOpacity(0.3) : AppColors.borderLight,
-                            width: isSelected ? 2 : 1,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              width: 24,
-                              height: 24,
-                              decoration: BoxDecoration(
-                                color: isSelected ? color : Colors.transparent,
-                                borderRadius: BorderRadius.circular(6),
-                                border: Border.all(
-                                  color: isSelected ? color : AppColors.borderMedium,
-                                  width: 2,
-                                ),
-                              ),
-                              child: isSelected
-                                  ? const Icon(Icons.check_rounded, size: 16, color: Colors.white)
-                                  : null,
-                            ),
-                            const SizedBox(width: 12),
-                            Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: color.withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Icon(icon, size: 16, color: color),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                status,
-                                style: AppTypography.bodyMedium.copyWith(
-                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                                  color: isSelected ? color : AppColors.textPrimary,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Divider(),
-            const SizedBox(height: 16),
-            // RESUMO E AÇÕES
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.primaryOpacity8,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppColors.primaryOpacity25),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline_rounded, size: 18, color: AppColors.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${_selecionados.length} status selecionado${_selecionados.length != 1 ? 's' : ''}',
-                    style: AppTypography.bodySmall.copyWith(
-                      color: AppColors.primary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: AppButton(
-                    label: 'Cancelar',
-                    variant: AppButtonVariant.outline,
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: AppButton(
-                    label: 'Aplicar',
-                    onPressed: () {
-                      widget.onConfirmar(_selecionados);
-                      Navigator.pop(context);
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ========================================
 // MODAL DE DETALHES DO PEDIDO
 // ========================================
 class _DetalhesPedido extends StatefulWidget {
@@ -975,20 +822,20 @@ class _DetalhesPedido extends StatefulWidget {
 class _DetalhesPedidoState extends State<_DetalhesPedido> {
   late List<Map<String, dynamic>> formas;
   String? entregadorSelecionado;
-  late final double valorTotal;
-  late final double taxa;
+  String? statusSelecionado;
+  late double valorTotal;
+  late double taxa;
   List<String> _entregadores = [];
   bool _loadingEntregadores = true;
 
   @override
   void initState() {
     super.initState();
+    final statusAtual = widget.data['status'] == '-' ? 'Processando' : (widget.data['status'] ?? 'Processando');
+  statusSelecionado = statusAtual;
     final pagamento = widget.data['pagamento'] as Map<String, dynamic>?;
     formas = (pagamento?['formas'] as List?)?.cast<Map<String, dynamic>>() ?? [
-      {
-        'tipo': pagamento?['metodo_principal'] ?? 'Cartão',
-        'valor': pagamento?['valor_total'] ?? 0.0
-      }
+      {'tipo': pagamento?['metodo_principal'] ?? 'Cartão', 'valor': pagamento?['valor_total'] ?? 0.0}
     ];
 
     valorTotal = (pagamento?['valor_total'] as num?)?.toDouble() ?? 0.0;
@@ -998,35 +845,24 @@ class _DetalhesPedidoState extends State<_DetalhesPedido> {
     entregadorSelecionado = (entregadorAtual == '-' || entregadorAtual == null) ? null : entregadorAtual;
 
     _carregarEntregadores();
-     // Teste direto
-FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
-  debugPrint('🔥 Total docs: ${snapshot.docs.length}');
-  for (var doc in snapshot.docs) {
-    debugPrint('📄 Doc ID: ${doc.id}, Data: ${doc.data()}');
   }
-}).catchError((e) {
-  debugPrint('❌ Erro: $e');
-});
-  }
-
-  
 
   Future<void> _carregarEntregadores() async {
-  try {
-    final snapshot = await FirebaseFirestore.instance.collection('entregadores').get();
-    setState(() {
-      _entregadores = snapshot.docs.map((doc) {
-        final data = doc.data() as Map<String, dynamic>;
-        // Tenta diferentes variações do campo
-        return (data['nome'] ?? data['Nome'] ?? data['NOME'] ?? 'Sem nome') as String;
-      }).toList();
-      _loadingEntregadores = false;
-    });
-  } catch (e) {
-    debugPrint('Erro ao carregar entregadores: $e');
-    setState(() => _loadingEntregadores = false);
+    try {
+      final snapshot = await FirebaseFirestore.instance.collection('entregadores').get();
+      setState(() {
+        _entregadores = snapshot.docs.map((doc) {
+          final data = doc.data() as Map<String, dynamic>;
+          return (data['nome'] ?? data['Nome'] ?? data['NOME'] ?? 'Sem nome') as String;
+        }).toList();
+        _loadingEntregadores = false;
+      });
+    } catch (e) {
+      debugPrint('Erro ao carregar entregadores: $e');
+      setState(() => _loadingEntregadores = false);
+    }
   }
-}
+
   @override
   Widget build(BuildContext context) {
     final status = widget.data['status'] == '-' ? 'Processando' : (widget.data['status'] ?? 'Processando');
@@ -1053,7 +889,6 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
               ),
             ),
             const SizedBox(height: 16),
-            // HEADER
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
@@ -1074,7 +909,6 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                       children: [
                         Text('Pedido #${widget.data['id']}', style: AppTypography.cardTitle),
                         const SizedBox(height: 6),
-                        // BADGE COLORIDO
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
@@ -1114,7 +948,6 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
               ),
             ),
             const Divider(height: 24),
-            // CONTEÚDO
             Expanded(
               child: ListView(
                 controller: controller,
@@ -1137,6 +970,7 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                     children: [
                       _infoRow(Icons.warehouse_rounded, 'CD', widget.data['cd']),
                       _buildEntregadorRow(),
+                      _buildStatusRow(),
                       if (widget.data['agendamento']?['is_agendado'] == true)
                         _infoRow(Icons.schedule_rounded, 'Agendamento', widget.data['agendamento']?['janela_texto']),
                     ],
@@ -1152,9 +986,7 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                               children: [
                                 Icon(Icons.shopping_basket_rounded, size: 16, color: AppColors.primary),
                                 const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(item['nome'], style: AppTypography.bodySmall),
-                                ),
+                                Expanded(child: Text(item['nome'], style: AppTypography.bodySmall)),
                                 Text(
                                   'Qtd: ${item['quantidade']}',
                                   style: AppTypography.caption.copyWith(
@@ -1168,7 +1000,7 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  _buildPagamentoSection(valorTotal, taxa),
+                  _buildPagamentoSection(),
                   const SizedBox(height: 24),
                 ],
               ),
@@ -1179,9 +1011,6 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
     );
   }
 
-  // ========================================
-  // SELEÇÃO DE ENTREGADOR (DROPDOWN FUNCIONAL)
-  // ========================================
   Widget _buildEntregadorRow() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1209,10 +1038,7 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                         isDense: true,
                         hint: Text('Selecione um entregador', style: AppTypography.bodySmall),
                         items: [
-                          const DropdownMenuItem<String?>(
-                            value: null,
-                            child: Text('Sem entregador'),
-                          ),
+                          const DropdownMenuItem<String?>(value: null, child: Text('Sem entregador')),
                           ..._entregadores.map((nome) => DropdownMenuItem<String?>(
                                 value: nome,
                                 child: Text(nome, style: AppTypography.bodySmall),
@@ -1221,15 +1047,20 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                         onChanged: (novoEntregador) async {
                           setState(() => entregadorSelecionado = novoEntregador);
 
-                          // ATUALIZA NO FIRESTORE
                           try {
-                            await FirebaseFirestore.instance
-                                .collection('pedidos')
-                                .doc(widget.pedidoId)
-                                .update({
+                            // Atualiza no Firestore
+                            await FirebaseFirestore.instance.collection('pedidos').doc(widget.pedidoId).update({
                               'entregador': novoEntregador ?? '-',
                               'updated_at': FieldValue.serverTimestamp(),
                             });
+
+                            // Sincroniza com Google Sheets
+                            await _sincronizarComSheets(
+                              id: widget.data['id'],
+                              cd: widget.data['cd'],
+                              status: widget.data['status'],
+                              entregador: novoEntregador ?? '-',
+                            );
 
                             widget.onAtualizado();
 
@@ -1260,6 +1091,97 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
     );
   }
 
+  Widget _buildStatusRow() {
+  final statusList = [
+    'Pendente',
+    'Processando',
+    'Registrado',
+    'Agendado',
+    'Saiu pra Entrega',
+    'Concluído',
+    'Cancelado',
+    'Publi',
+    'Retirado'
+  ];
+
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.sync_rounded, size: 18, color: AppColors.primary),
+        const SizedBox(width: 8),
+        Text('Status:', style: AppTypography.bodySmall.copyWith(fontWeight: FontWeight.w500)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.primaryOpacity8,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.primaryOpacity25),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: statusSelecionado,
+                isExpanded: true,
+                isDense: true,
+                hint: Text('Selecione o status', style: AppTypography.bodySmall),
+                items: statusList.map((s) => DropdownMenuItem(
+                  value: s,
+                  child: Row(
+                    children: [
+                      Icon(_getStatusIcon(s), size: 16, color: _getStatusColor(s)),
+                      const SizedBox(width: 6),
+                      Text(s, style: AppTypography.bodySmall),
+                    ],
+                  ),
+                )).toList(),
+                onChanged: (novoStatus) async {
+                  if (novoStatus == null) return;
+
+                  setState(() => statusSelecionado = novoStatus);
+
+                  try {
+                    await FirebaseFirestore.instance
+                        .collection('pedidos')
+                        .doc(widget.pedidoId)
+                        .update({
+                      'status': novoStatus == 'Processando' ? '-' : novoStatus,
+                      'updated_at': FieldValue.serverTimestamp(),
+                    });
+
+                    await _sincronizarComSheets(
+                      id: widget.data['id'],
+                      cd: widget.data['cd'],
+                      status: novoStatus,
+                    );
+
+                    widget.onAtualizado();
+                    AppSnackbar.show(
+                      context,
+                      message: 'Status atualizado para: $novoStatus',
+                      type: AppSnackbarType.success,
+                    );
+                  } catch (e) {
+                    setState(() => statusSelecionado = widget.data['status'] == '-' ? 'Processando' : widget.data['status']);
+                    AppSnackbar.show(
+                      context,
+                      message: 'Erro ao atualizar status: $e',
+                      type: AppSnackbarType.error,
+                    );
+                  }
+                },
+                icon: Icon(Icons.arrow_drop_down_rounded, color: AppColors.primary, size: 20),
+              ),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
   Widget _buildSection({
     required String title,
     required IconData icon,
@@ -1289,7 +1211,7 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
     );
   }
 
-  Widget _buildPagamentoSection(double valorTotal, double taxa) {
+  Widget _buildPagamentoSection() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1307,22 +1229,23 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                 children: [
                   Icon(Icons.payment_rounded, color: AppColors.primary, size: 18),
                   const SizedBox(width: 8),
-                  Text('Formas de Pagamento', style: AppTypography.label),
+                  Text('Pagamento', style: AppTypography.label),
                 ],
               ),
-              IconButton(
-                icon: Icon(Icons.edit_rounded, size: 18, color: AppColors.primary),
-                onPressed: _editarPagamentos,
+              AppIconButton(
+                icon: Icons.edit_rounded,
                 tooltip: 'Editar Pagamento',
+                size: 16,
+                onPressed: _editarPagamento,
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const Divider(height: 20),
           ...formas.map((f) => Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Row(
                   children: [
-                    Icon(_getIconForma(f['tipo']), size: 16, color: AppColors.primary),
+                    Icon(_getIconForma(f['tipo']), size: 16, color: AppColors.textSecondary),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -1341,42 +1264,146 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
                 ),
               )),
           const Divider(height: 20),
-          _infoRow(Icons.delivery_dining_rounded, 'Taxa de Entrega', 'R\$ ${taxa.toStringAsFixed(2)}'),
-          const SizedBox(height: 4),
-          _infoRow(
-            Icons.paid_rounded,
-            'TOTAL',
-            'R\$ ${valorTotal.toStringAsFixed(2)}',
-            isBold: true,
-            color: AppColors.success,
+          Row(
+            children: [
+              Icon(Icons.delivery_dining_rounded, size: 16, color: AppColors.textSecondary),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('Taxa de Entrega')),
+              Text(
+                'R\$ ${taxa.toStringAsFixed(2)}',
+                style: AppTypography.bodySmall.copyWith(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.paid_rounded, size: 18, color: AppColors.success),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'TOTAL',
+                  style: AppTypography.label.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Text(
+                'R\$ ${valorTotal.toStringAsFixed(2)}',
+                style: AppTypography.cardTitle.copyWith(
+                  color: AppColors.success,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  void _editarPagamentos() {
+  void _editarPagamento() {
     showDialog(
       context: context,
       builder: (_) => _PagamentoDialog(
         formasIniciais: List.from(formas),
-        valorTotal: valorTotal,
-        onSalvar: (novasFormas) async {
-          await FirebaseFirestore.instance.collection('pedidos').doc(widget.pedidoId).update({
-            'pagamento.formas': novasFormas,
-            'updated_at': FieldValue.serverTimestamp(),
-          });
-          setState(() => formas = novasFormas);
-          widget.onAtualizado();
-          Navigator.pop(context);
-          AppSnackbar.show(
-            context,
-            message: 'Pagamento atualizado com sucesso!',
-            type: AppSnackbarType.success,
-          );
+        valorTotalInicial: valorTotal,
+        taxaInicial: taxa,
+        onSalvar: (novasFormas, novoTotal, novaTaxa) async {
+          try {
+            // Atualiza no Firestore
+            await FirebaseFirestore.instance.collection('pedidos').doc(widget.pedidoId).update({
+              'pagamento.formas': novasFormas,
+              'pagamento.valor_total': novoTotal,
+              'pagamento.taxa_entrega': novaTaxa,
+              'updated_at': FieldValue.serverTimestamp(),
+            });
+
+            // Sincroniza com Google Sheets
+            await _sincronizarComSheets(
+              id: widget.data['id'],
+              cd: widget.data['cd'],
+              status: widget.data['status'],
+              formasPagamento: novasFormas,
+              valorTotal: novoTotal,
+              taxaEntrega: novaTaxa,
+            );
+
+            setState(() {
+              formas = novasFormas;
+              valorTotal = novoTotal;
+              taxa = novaTaxa;
+            });
+            widget.onAtualizado();
+            Navigator.pop(context);
+            AppSnackbar.show(
+              context,
+              message: 'Pagamento atualizado com sucesso!',
+              type: AppSnackbarType.success,
+            );
+          } catch (e) {
+            AppSnackbar.show(
+              context,
+              message: 'Erro ao atualizar pagamento: $e',
+              type: AppSnackbarType.error,
+            );
+          }
         },
       ),
     );
+  }
+
+  // INTEGRAÇÃO COM GOOGLE SHEETS
+  Future<void> _sincronizarComSheets({
+    required String id,
+    required String cd,
+    required String status,
+    String? entregador,
+    List<Map<String, dynamic>>? formasPagamento,
+    double? valorTotal,
+    double? taxaEntrega,
+  }) async {
+    try {
+      // Monta o payload
+      final payload = {
+        'action': 'UpdatePedido',
+        'id': id,
+        'cd': cd,
+        'status': status,
+      };
+
+      if (entregador != null) {
+        payload['entregador'] = entregador;
+      }
+
+      if (formasPagamento != null && formasPagamento.isNotEmpty) {
+        // Concatena formas de pagamento (ex: "Cartão + Pix")
+        final formasTexto = formasPagamento.map((f) => f['tipo']).join(' + ');
+        payload['pagamento'] = formasTexto;
+      }
+
+      if (valorTotal != null) {
+        payload['valor_total'] = valorTotal.toString();
+      }
+
+      if (taxaEntrega != null) {
+        payload['taxa_entrega'] = taxaEntrega.toString();
+      }
+
+      // Faz o fetch para o Google Apps Script
+      final response = await http.get(
+        Uri.parse(GOOGLE_SCRIPT_URL).replace(queryParameters: payload),
+      );
+
+      if (response.statusCode == 200) {
+        final result = json.decode(response.body);
+        if (result['status'] != 'success') {
+          debugPrint('Erro ao sincronizar com Sheets: ${result['message']}');
+        }
+      } else {
+        debugPrint('Erro HTTP ao sincronizar com Sheets: ${response.statusCode}');
+      }
+    } catch (e) {
+      debugPrint('Erro ao sincronizar com Sheets: $e');
+    }
   }
 
   IconData _getIconForma(String tipo) {
@@ -1389,27 +1416,19 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
     };
   }
 
-  Widget _infoRow(IconData icon, String label, dynamic value, {bool isBold = false, Color? color}) {
+  Widget _infoRow(IconData icon, String label, dynamic value) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: color ?? AppColors.primary),
+          Icon(icon, size: 16, color: AppColors.primary),
           const SizedBox(width: 8),
-          Text(
-            '$label:',
-            style: AppTypography.bodySmall.copyWith(
-              fontWeight: isBold ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
+          Text('$label:', style: AppTypography.bodySmall.copyWith(fontWeight: FontWeight.w500)),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               value?.toString() ?? 'N/A',
-              style: AppTypography.bodySmall.copyWith(
-                fontWeight: isBold ? FontWeight.w700 : FontWeight.w400,
-                color: color ?? AppColors.textPrimary,
-              ),
+              style: AppTypography.bodySmall,
               textAlign: TextAlign.end,
             ),
           ),
@@ -1454,12 +1473,14 @@ FirebaseFirestore.instance.collection('entregadores').get().then((snapshot) {
 // ========================================
 class _PagamentoDialog extends StatefulWidget {
   final List<Map<String, dynamic>> formasIniciais;
-  final double valorTotal;
-  final Function(List<Map<String, dynamic>>) onSalvar;
+  final double valorTotalInicial;
+  final double taxaInicial;
+  final Function(List<Map<String, dynamic>>, double, double) onSalvar;
 
   const _PagamentoDialog({
     required this.formasIniciais,
-    required this.valorTotal,
+    required this.valorTotalInicial,
+    required this.taxaInicial,
     required this.onSalvar,
   });
 
@@ -1470,10 +1491,11 @@ class _PagamentoDialog extends StatefulWidget {
 class _PagamentoDialogState extends State<_PagamentoDialog> {
   late List<Map<String, dynamic>> formas;
   final List<TextEditingController> _controllers = [];
+  late TextEditingController _taxaController;
+  late TextEditingController _totalController;
 
   @override
   void initState() {
-
     super.initState();
     formas = widget.formasIniciais.map((f) => Map<String, dynamic>.from(f)).toList();
     
@@ -1486,6 +1508,9 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
       });
       _controllers.add(controller);
     }
+
+    _taxaController = TextEditingController(text: widget.taxaInicial.toStringAsFixed(2));
+    _totalController = TextEditingController(text: widget.valorTotalInicial.toStringAsFixed(2));
   }
 
   @override
@@ -1493,18 +1518,22 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
     for (var controller in _controllers) {
       controller.dispose();
     }
+    _taxaController.dispose();
+    _totalController.dispose();
     super.dispose();
   }
 
   double get totalPago => formas.fold(0.0, (sum, f) => sum + (f['valor'] as num).toDouble());
-  bool get isValid => (totalPago - widget.valorTotal).abs() < 0.01;
+  double get valorTotal => double.tryParse(_totalController.text) ?? 0.0;
+  double get taxa => double.tryParse(_taxaController.text) ?? 0.0;
+  bool get isValid => (totalPago - valorTotal).abs() < 0.01;
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Container(
-        width: 500,
+        width: 550,
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -1529,6 +1558,8 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
               ],
             ),
             const SizedBox(height: 20),
+            Text('Formas de Pagamento', style: AppTypography.label),
+            const SizedBox(height: 12),
             ...formas.asMap().entries.map((entry) {
               final i = entry.key;
               final f = entry.value;
@@ -1555,10 +1586,7 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
                           child: DropdownButton<String>(
                             value: f['tipo'],
                             items: ['Cartão', 'Pix', 'Crédito Site', 'V.A.']
-                                .map((t) => DropdownMenuItem(
-                                      value: t,
-                                      child: Text(t, style: AppTypography.bodySmall),
-                                    ))
+                                .map((t) => DropdownMenuItem(value: t, child: Text(t, style: AppTypography.bodySmall)))
                                 .toList(),
                             onChanged: (v) => setState(() => f['tipo'] = v),
                             underline: const SizedBox.shrink(),
@@ -1621,9 +1649,35 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
                 });
               },
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 20),
             const Divider(),
-            const SizedBox(height: 8),
+            const SizedBox(height: 20),
+            Text('Valores', style: AppTypography.label),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: AppTextField(
+                    label: 'Taxa de Entrega',
+                    controller: _taxaController,
+                    keyboardType: TextInputType.number,
+                    prefixIcon: Icons.delivery_dining_rounded,
+                    onSuffixTap: () {},
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: AppTextField(
+                    label: 'Valor Total',
+                    controller: _totalController,
+                    keyboardType: TextInputType.number,
+                    prefixIcon: Icons.paid_rounded,
+                    onSuffixTap: () {},
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
@@ -1648,12 +1702,16 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
                       ),
                     ],
                   ),
+                  Icon(
+                    isValid ? Icons.check_circle : Icons.error,
+                    color: isValid ? AppColors.success : AppColors.error,
+                  ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text('Total esperado', style: AppTypography.caption),
+                      Text('Valor total', style: AppTypography.caption),
                       Text(
-                        'R\$ ${widget.valorTotal.toStringAsFixed(2)}',
+                        'R\$ ${valorTotal.toStringAsFixed(2)}',
                         style: AppTypography.label,
                       ),
                     ],
@@ -1668,7 +1726,6 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
                   child: AppButton(
                     label: 'Cancelar',
                     variant: AppButtonVariant.outline,
-                    size: AppButtonSize.medium,
                     onPressed: () => Navigator.pop(context),
                   ),
                 ),
@@ -1676,8 +1733,7 @@ class _PagamentoDialogState extends State<_PagamentoDialog> {
                 Expanded(
                   child: AppButton(
                     label: 'Salvar',
-                    size: AppButtonSize.medium,
-                    onPressed: isValid ? () => widget.onSalvar(formas) : null,
+                    onPressed: isValid ? () => widget.onSalvar(formas, valorTotal, taxa) : null,
                   ),
                 ),
               ],
