@@ -5,7 +5,7 @@ import '../provider/auth_provider.dart';
 import '../enums.dart';
 import '../widgets/sidebar_menu.dart';
 import 'dashboard_page.dart';
-import 'pedidos_page.dart';
+import 'pedidos/pedidos_page.dart';
 import 'criar_link_page.dart';
 import 'conferir_pagamentos_page.dart';
 import 'motoboys_page.dart';
